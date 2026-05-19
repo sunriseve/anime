@@ -1,0 +1,9 @@
+{
+  "name": "anime",
+  "packageName": "dev.skystream.repo",
+  "description": "plugin repository",
+  "manifestVersion": 1,
+  "pluginLists": [
+    "https://raw.githubusercontent.com/sunriseve/anime/repo/dist/plugins.json"
+  ]
+}
