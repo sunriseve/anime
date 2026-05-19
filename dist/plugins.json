@@ -2,9 +2,9 @@
   {
     "packageName": "dev.sunriseve.stremio",
     "name": "Stremio",
-    "version": 5,
+    "version": 6,
     "baseUrl": "https://stremio-hub.local",
-    "description": "Aggregator for 22 curated HTTP streaming addons (English & Indian content) + high-speed torrent addons. HTTP sources prioritized for instant direct streaming. v5.4 — Removed dead addons (13 removed). Added live tracker list from ngosang/trackerslist + XIU2 (200+ trackers, auto-updated daily) for faster torrent peer discovery. Improved magnet link generation with hybrid fetch+cache+fallback.",
+    "description": "Aggregator for 22 curated HTTP streaming addons (English & Indian content) + high-speed torrent addons. HTTP sources prioritized for instant direct streaming. v6.0 — Fixed search/load: now uses dedicated metaAddons (Cinemeta) for search & metadata, independent of catalogueAddons (which provide home categories only).",
     "authors": [
       "sunriseve"
     ],
@@ -24,7 +24,9 @@
       "Indian"
     ],
     "catalogueAddons": [
-      "https://indian-regional-catalog.vercel.app/eyJjYXRhbG9ncyI6WyJ0ZSIsImhpIiwidGVfc2VyaWVzIiwiaGlfc2VyaWVzIiwib3R0X3JlbGVhc2VzIl0sImluY2x1ZGVUaGVhdHJpY2FsIjp0cnVlfQ==/manifest.json",
+      "https://indian-regional-catalog.vercel.app/eyJjYXRhbG9ncyI6WyJ0ZSIsImhpIiwidGVfc2VyaWVzIiwiaGlfc2VyaWVzIiwib3R0X3JlbGVhc2VzIl0sImluY2x1ZGVUaGVhdHJpY2FsIjp0cnVlfQ==/manifest.json"
+    ],
+    "metaAddons": [
       "https://v3-cinemeta.strem.io/manifest.json"
     ],
     "streamingAddons": [
