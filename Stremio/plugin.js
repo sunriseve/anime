@@ -1,119 +1,67 @@
 (function() {
     "use strict";
 
+    // SkyStream JS engine may not provide full console API
+    if (typeof console === 'undefined') {
+        console = { log: function(){}, warn: function(){}, error: function(){} };
+    }
+
     // ═══════════════════════════════════════════════════════════════════
-    //  Stremio Hub v5 — Stable, Full-Featured Stremio Aggregator
+    //  Stremio Hub v6
     // ═══════════════════════════════════════════════════════════════════
     //
-    //  WHAT THIS PLUGIN DOES:
-    //  Aggregates multiple Stremio addons into a single SkyStream plugin.
-    //  It fetches catalogs, metadata, streams, subtitles, and search
-    //  results from all configured addons and presents them unified.
-    //
-    //  HOW ADDON PRIORITY WORKS:
-    //  - `catalogueAddons` (in plugin.json) — order defines priority:
-    //    first addon = highest priority for catalog/metadata
-    //  - `streamingAddons` (in plugin.json) — order defines priority:
-    //    first addon = highest priority for streams
-    //  - For duplicate stream URLs, only the first occurrence is kept
-    //
-    //  ARCHITECTURE:
-    //  getHome()    → fetches catalogs from all catalogueAddons
-    //  search()     → searches all catalogueAddons
-    //  load()       → fetches metadata + pre-fetches streams (background)
-    //  loadStreams()→ fetches streams from all streamingAddons
-    //
-    //  COMPATIBILITY:
-    //  - SkyStream Gen 2 plugin system
-    //  - Uses native http_parallel, parse_html, solveCaptcha helpers
+    //  getHome()    → catalogueAddons (browse catalogs only)
+    //  search()     → metaAddons (Cinemeta etc.)
+    //  load()       → metaAddons for metadata + pre-fetches streams
+    //  loadStreams()-> streamingAddons (with 3-min read-through cache)
     // ═══════════════════════════════════════════════════════════════════
 
     // ────────────────────────────────────────────────────────────────
     //  SECTION 1: CONFIGURATION & CONSTANTS
     // ────────────────────────────────────────────────────────────────
 
-    /** Default User-Agent for HTTP requests */
     var UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-    /** JSON-specific request headers */
     var JSON_HEADERS = {
         "User-Agent": UA,
         "Accept": "application/json",
         "Accept-Language": "en-US,en;q=0.5"
     };
 
-    // ── Cache Configuration ────────────────────────────────────────
-    // The cache stores:
-    //   - Addon manifests (key: "mf:<url>")
-    //   - Stream results for pre-fetch (key: "streams:<metaId>")
-    //   - Metadata lookups (key: "meta:<id>:<type>")
-    //
-    // Cache TTL is 10 minutes by default. User can override via
-    // SkyStream preferences: setPreference("hub_cache_ttl", <milliseconds>)
-
-    /** @type {number} Cache TTL in milliseconds (default: 10 min) */
     var CACHE_TTL = 600000;
-
-    /** @type {Object.<string, {ts: number, data: *}>} In-memory LRU cache */
+    var STREAM_CACHE_TTL = 180000; // 3 min — read-through cache for tapped streams
     var _cache = {};
-
-    /** @type {number} Max cache entries before eviction starts */
     var CACHE_MAX_ENTRIES = 500;
 
-    // Load user preference for cache TTL
     try {
         var ttlPref = parseInt(getPreference("hub_cache_ttl"), 10);
         if (ttlPref > 0) CACHE_TTL = ttlPref;
-    } catch (e) { /* Preference API may not be available */ }
+    } catch (e) {
+        console.warn("[Hub] Preference API unavailable for cache_ttl:", e.message);
+    }
 
-    // ── Stream Timeout Configuration ───────────────────────────────
-    // Per-addon timeout (not global): each streaming addon gets this
-    // much time to respond. This prevents one slow addon from blocking
-    // all others. If an addon times out, we move on without its streams.
-
-    /** @type {number} Per-addon stream fetch timeout in ms (80s to give slow addons time) */
+    // Per-addon stream timeout (80s) — prevents one slow addon blocking all
     var STREAM_ADDON_TIMEOUT = 80000;
 
     try {
         var stPref = parseInt(getPreference("hub_stream_timeout"), 10);
         if (stPref > 0) STREAM_ADDON_TIMEOUT = stPref;
-    } catch (e) {}
+    } catch (e) {
+        console.warn("[Hub] Preference API unavailable for stream_timeout:", e.message);
+    }
 
-    /** @type {number} Metadata fetch timeout per-addon in ms (default: 8s) */
     var META_TIMEOUT = 8000;
 
-    // ── Rate-Limiting / Backoff ───────────────────────────────────
-    // If an addon returns 429 (Too Many Requests), 503, 502, or 504,
-    // we back off that URL for RATE_BACKOFF_MS milliseconds after
-    // RATE_MAX_FAILS consecutive failures. A successful response
-    // resets the fail counter.
-
-    /**
-     * @type {Object.<string, {fails: number, until: number}>}
-     * Per-URL rate limit tracker
-     */
+    // Rate-limit: backoff 5min after 3 consecutive 429/503/502/504
     var _rateLimits = {};
-
-    /** @type {number} Backoff duration after max failures (5 min) */
     var RATE_BACKOFF_MS = 300000;
-
-    /** @type {number} Consecutive failures before backoff triggers */
     var RATE_MAX_FAILS = 3;
 
-    // ── Search Configuration ──────────────────────────────────────
-    /** @type {number} Maximum search results to return */
     var MAX_SEARCH_RESULTS = 50;
-
-    /** @type {number} Max items per catalog page */
+    var MAX_SEARCH_QUERY_LENGTH = 200;
     var CATALOG_PAGE_SIZE = 20;
 
-    // ── Bittorrent Trackers ───────────────────────────────────────
-    // Fetches live tracker lists from multiple raw txt URLs (updated daily).
-    // All sources are combined, deduplicated, and cached via preferences.
-    // Minimal hardcoded fallback for emergencies only.
-    // Source: https://github.com/ngosang/trackerslist
-
-    /** Emergency fallback — only used when ALL live fetches AND cache fail */
+    // Trackers: fetched live from GitHub/community lists, cached, fallback if all fail
     var FALLBACK_TRACKERS = [
         "udp://tracker.opentrackr.org:1337/announce",
         "udp://open.demonii.com:1337/announce",
@@ -132,22 +80,14 @@
         "https://raw.githubusercontent.com/ngosang/trackerslist/master/trackers_best.txt",
     ];
 
-    /** Active tracker list — starts as fallback, replaced by live fetch or cache */
     var TRACKERS = FALLBACK_TRACKERS.slice();
 
-    /** Whether we've already attempted the live fetch */
     var _trackersFetched = false;
 
-    /**
-     * Fetch ALL live tracker lists, combine them, deduplicate, and update TRACKERS.
-     * Falls back to cache first, then hardcoded fallback on any error.
-     * Called lazily — only when a torrent stream needs a magnet link.
-     */
     function ensureTrackersLoaded() {
         if (_trackersFetched) return;
         _trackersFetched = true;
 
-        // Check persistent cache first
         try {
             var cachedRaw = getPreference("hub_trackers_list");
             if (cachedRaw) {
@@ -158,7 +98,9 @@
                     return;
                 }
             }
-        } catch (e) { /* Preference API may not be available */ }
+        } catch (e) {
+            console.warn("[Hub] Preference API unavailable for trackers_list:", e.message);
+        }
 
         // Fetch ALL live lists and combine them (non-blocking, fire-and-forget)
         try {
@@ -166,7 +108,6 @@
             var seen = {};
             var remaining = TRACKERS_LIST_URLS.length;
 
-            // Helper: parse body text and add to combined list
             function addTrackersFromBody(body) {
                 var lines = body.split("\n");
                 for (var i = 0; i < lines.length; i++) {
@@ -184,7 +125,6 @@
                 }
             }
 
-            // Fetch each URL
             for (var ui = 0; ui < TRACKERS_LIST_URLS.length; ui++) {
                 (function(url, idx) {
                     http_get(url, { "User-Agent": UA }).then(function(resp) {
@@ -193,7 +133,6 @@
                             addTrackersFromBody(body);
                         }
                         remaining--;
-                        // When all fetches complete (or timeout), finalize
                         if (remaining <= 0) finalizeTrackers(allParsed);
                     }).catch(function() {
                         remaining--;
@@ -203,12 +142,17 @@
             }
 
             // Safety timeout: if some fetches hang, finalize after 10s
-            setTimeout(function() {
-                if (remaining > 0) {
-                    remaining = 0;
-                    finalizeTrackers(allParsed);
-                }
-            }, 10000);
+            // Guard: setTimeout may not be available in all SkyStream JS engine builds
+            if (typeof setTimeout !== 'undefined') {
+                setTimeout(function() {
+                    if (remaining > 0) {
+                        remaining = 0;
+                        finalizeTrackers(allParsed);
+                    }
+                }, 10000);
+            } else {
+                console.warn("[Hub] setTimeout unavailable — skipping tracker fetch safety timeout");
+            }
 
         } catch (e) {
             console.warn("[Hub] Live tracker fetch threw: " + (e.message || e) + ", using fallback");
@@ -222,13 +166,14 @@
     function finalizeTrackers(parsed) {
         if (parsed.length > 0) {
             TRACKERS = parsed;
-            try { setPreference("hub_trackers_list", JSON.stringify(parsed)); } catch (e) {}
+            try { setPreference("hub_trackers_list", JSON.stringify(parsed)); } catch (e) {
+                console.warn("[Hub] Failed to cache trackers list:", e.message);
+            }
             console.log("[Hub] Trackers fetched live from " + TRACKERS_LIST_URLS.length + " source(s): " + TRACKERS.length + " trackers total");
         } else {
             console.warn("[Hub] All live tracker fetches returned 0 entries, using fallback (" + FALLBACK_TRACKERS.length + " trackers)");
         }
     }
-
 
     // ────────────────────────────────────────────────────────────────
     //  SECTION 2: UTILITY FUNCTIONS
@@ -253,7 +198,6 @@
      */
     function addonName(url) {
         try {
-            // Strip protocol and split by dots
             var parts = url.replace(/https?:\/\//, "").split("/")[0].replace(/^www\./, "").split(".");
             // If first part is a hex hash (deployment ID), use the second-level domain
             var name = parts[0] || "";
@@ -272,12 +216,11 @@
                     }
                 }
             }
-            // Convert kebab-case to Title Case
             name = name.replace(/[-_]/g, " ").replace(/\b\w/g, function(c) { return c.toUpperCase(); });
-            // Common acronym corrections
             name = name.replace(/\bTmdb\b/g, "TMDB");
             return name.trim() || "Addon";
         } catch (e) {
+            console.warn("[Hub] addonName parse error for URL:", e.message);
             return "Addon";
         }
     }
@@ -373,7 +316,6 @@
         return undefined;
     }
 
-
     // ────────────────────────────────────────────────────────────────
     //  SECTION 3: CACHE SYSTEM
     // ────────────────────────────────────────────────────────────────
@@ -395,22 +337,22 @@
      * @returns {*|null} Cached data or null if not found/expired
      */
     function cacheGet(key) {
-        // Check in-memory cache first
         var entry = _cache[key];
         if (entry && (Date.now() - entry.ts) < CACHE_TTL) {
             return entry.data;
         }
-        // Fall back to persistent preference cache
         try {
             var raw = getPreference("hub_cache:" + key);
             if (raw) {
                 var parsed = safeJson(raw, null);
                 if (parsed && parsed.ts && (Date.now() - parsed.ts) < CACHE_TTL) {
-                    _cache[key] = parsed; // Promote to in-memory
+                    _cache[key] = parsed;
                     return parsed.data;
                 }
             }
-        } catch (e) { /* Preference API may be unavailable */ }
+        } catch (e) {
+            console.warn("[Hub] Preference API unavailable for cache get:", e.message);
+        }
         return null;
     }
 
@@ -435,12 +377,12 @@
             }
             delete _cache[oldest];
         }
-        // Persist
         try {
             setPreference("hub_cache:" + key, JSON.stringify(entry));
-        } catch (e) {}
+        } catch (e) {
+            console.warn("[Hub] Failed to persist cache entry:", key, e.message);
+        }
     }
-
 
     // ────────────────────────────────────────────────────────────────
     //  SECTION 4: RATE LIMITING
@@ -468,16 +410,19 @@
             rl.fails++;
             rl.until = Date.now() + RATE_BACKOFF_MS;
             _rateLimits[url] = rl;
-            try { setPreference("hub_ratelimit:" + url, JSON.stringify(rl)); } catch (e) {}
+            try { setPreference("hub_ratelimit:" + url, JSON.stringify(rl)); } catch (e) {
+                console.warn("[Hub] Failed to persist rate limit:", e.message);
+            }
         } else if (status >= 200 && status < 300) {
             // Success — reset failure counter
             if (_rateLimits[url]) {
                 _rateLimits[url].fails = 0;
-                try { setPreference("hub_ratelimit:" + url, JSON.stringify(_rateLimits[url])); } catch (e) {}
+                try { setPreference("hub_ratelimit:" + url, JSON.stringify(_rateLimits[url])); } catch (e) {
+                    console.warn("[Hub] Failed to persist rate limit reset:", e.message);
+                }
             }
         }
     }
-
 
     // ────────────────────────────────────────────────────────────────
     //  SECTION 5: HTTP LAYER
@@ -536,15 +481,12 @@
             return Promise.resolve(allLimited);
         }
 
-        // Build request objects for active URLs
         var requests = [];
         for (var i = 0; i < activeUrls.length; i++) {
             requests.push(buildRequest(activeUrls[i]));
         }
 
-        // Fire requests via native parallel HTTP
         return http_parallel(requests).then(function(responses) {
-            // Build full results array aligned with input urls
             var results = [];
             for (var i = 0; i < urls.length; i++) {
                 results.push({ url: urls[i], ok: false, data: null, status: 0 });
@@ -655,12 +597,10 @@
                         if (redirectUrl.indexOf('http') !== 0) {
                             try { redirectUrl = new URL(url).origin + redirectUrl; } catch (e) {}
                         }
-                        // Follow redirect recursively (limit to avoid loops)
                         return fetchJson(redirectUrl, timeoutMs).then(resolve, reject);
                     }
                 }
 
-                // Validate response
                 if (response.status !== 200 && response.status !== 304) {
                     return reject(new Error("HTTP " + response.status + " from: " + url));
                 }
@@ -681,7 +621,6 @@
         });
     }
 
-
     // ────────────────────────────────────────────────────────────────
     //  SECTION 6: ADDON MANIFEST ACCESSORS
     // ────────────────────────────────────────────────────────────────
@@ -696,7 +635,9 @@
     function getCatalogueAddons() {
         try {
             if (manifest && Array.isArray(manifest.catalogueAddons)) return manifest.catalogueAddons;
-        } catch (e) {}
+        } catch (e) {
+            console.warn("[Hub] manifest.catalogueAddons access error:", e.message);
+        }
         return [];
     }
 
@@ -707,8 +648,62 @@
     function getStreamingAddons() {
         try {
             if (manifest && Array.isArray(manifest.streamingAddons)) return manifest.streamingAddons;
-        } catch (e) {}
+        } catch (e) {
+            console.warn("[Hub] manifest.streamingAddons access error:", e.message);
+        }
         return [];
+    }
+
+    /**
+     * Get the list of meta/search addon URLs (for search and metadata loading).
+     * These are addons like Cinemeta that provide search and /meta/ endpoints,
+     * separate from catalogueAddons which only provide browse catalogs.
+     *
+     * Falls back to catalogueAddons if metaAddons is not configured (backward compat).
+     * @returns {string[]}
+     */
+    /**
+     * Known metadata provider URL patterns — used for auto-detection when
+     * metaAddons is not configured. Any catalogueAddon URL matching these
+     * patterns is treated as a metadata provider for search() and load().
+     * Add new patterns here as needed.
+     */
+    var KNOWN_META_PROVIDER_PATTERNS = [
+        'cinemeta', 'cinemata',       // Stremio official + misspellings
+        'tmdb', 'themoviedb',         // TMDB-based addons
+        'cinebetter',                 // IMDb-based replacement
+        'aiometadata', 'aiometa',     // AIO multi-source metadata
+        'aiostreams'                  // AIO streams (has metadata)
+    ];
+
+    function getMetaAddons() {
+        try {
+            // 1. Use dedicated metaAddons if configured (primary path)
+            if (manifest && Array.isArray(manifest.metaAddons) && manifest.metaAddons.length > 0) {
+                return manifest.metaAddons;
+            }
+            // 2. Fallback: auto-detect metadata providers from catalogueAddons
+            var cats = getCatalogueAddons();
+            if (cats.length > 0) {
+                var detectedMetaAddons = [];
+                for (var ci = 0; ci < cats.length; ci++) {
+                    var lower = cats[ci].toLowerCase();
+                    for (var pi = 0; pi < KNOWN_META_PROVIDER_PATTERNS.length; pi++) {
+                        if (lower.indexOf(KNOWN_META_PROVIDER_PATTERNS[pi]) !== -1) {
+                            detectedMetaAddons.push(cats[ci]);
+                            break;
+                        }
+                    }
+                }
+                if (detectedMetaAddons.length > 0) return detectedMetaAddons;
+            }
+            // 3. Ultimate fallback: use all catalogueAddons (backward compatible)
+            // This preserves old behavior for users who haven't migrated yet.
+            return cats;
+        } catch (e) {
+            console.warn("[Hub] manifest.metaAddons access error:", e.message);
+            return getCatalogueAddons();
+        }
     }
 
     /**
@@ -768,7 +763,6 @@
             return results.filter(function(r) { return r !== null; });
         });
     }
-
 
     // ────────────────────────────────────────────────────────────────
     //  SECTION 7: VIDEO ID PARSING
@@ -873,7 +867,6 @@
         };
     }
 
-
     // ────────────────────────────────────────────────────────────────
     //  SECTION 8: METADATA → SKYSTREAM CONVERTERS
     // ────────────────────────────────────────────────────────────────
@@ -955,7 +948,6 @@
         }
     }
 
-
     // ────────────────────────────────────────────────────────────────
     //  SECTION 9: STREAM QUALITY PARSER
     // ────────────────────────────────────────────────────────────────
@@ -982,7 +974,7 @@
             audio: null,
             channels: null,
             sourceType: "unknown",
-            _sortKey: 2 // Default mid-range
+            _sortKey: 2
         };
         if (!text) return result;
 
@@ -1070,7 +1062,6 @@
         return parts.join(" ");
     }
 
-
     // ────────────────────────────────────────────────────────────────
     //  SECTION 10: STREAM FORMATTING ENGINE
     // ────────────────────────────────────────────────────────────────
@@ -1109,18 +1100,14 @@
             var origTitle = safeStr(stream.title).trim();
             var origDesc = safeStr(stream.description).trim();
 
-            // Flatten for feature parsing
             var fl = function(s) { return s.replace(/\n/g, " ").replace(/\s+/g, " ").trim(); };
             var combined = fl(origName) + " " + fl(origTitle) + " " + fl(origDesc);
             var features = parseStreamFeatures(combined);
 
-            // Build display: [AddonTag] NameContent | TitleContent
-            // This faithfully reproduces Stremio's two-line (name + title) layout
             var addonLabel = addonDisplayName || ("#" + addonIndex);
             var addonTag = "[" + addonLabel + "]";
             var displayParts = [];
 
-            // Collect name content (brand, quality badges)
             if (origName) {
                 var nameSegs = origName.split("\n");
                 for (var ni = 0; ni < nameSegs.length; ni++) {
@@ -1129,7 +1116,6 @@
                 }
             }
 
-            // Collect title/description content (filename, size, source, codec)
             var contentText = origTitle || origDesc;
             if (contentText) {
                 var segs = contentText.split("\n");
@@ -1143,7 +1129,6 @@
                 ? addonTag + " " + displayParts.join(" | ")
                 : addonTag;
 
-            // Prepare headers (combine addon headers with stream-specific ones)
             var headers = {};
 
             // If the stream has behaviorHints with proxyHeaders, use those
@@ -1161,7 +1146,6 @@
             // Copy behaviorHints but remove proxyHeaders/headers (they're extracted above)
             var bh = {};
             if (stream.behaviorHints) {
-                // Copy all behaviorHints properties
                 for (var key in stream.behaviorHints) {
                     if (stream.behaviorHints.hasOwnProperty(key)) {
                         if (key !== "proxyHeaders" && key !== "headers") {
@@ -1231,7 +1215,7 @@
                     size: stream.size || null,
                     headers: headers,
                     behaviorHints: Object.keys(bh).length > 0 ? bh : undefined,
-                    subtitles: subs,  // ← Pass through subtitles
+                    subtitles: subs,
                     _sortKey: features._sortKey
                 });
 
@@ -1257,7 +1241,7 @@
                         source: displaySource,
                         headers: headers,
                         behaviorHints: Object.keys(bh).length > 0 ? bh : undefined,
-                        subtitles: subs,  // ← Pass through subtitles
+                        subtitles: subs,
                         _sortKey: features._sortKey
                     });
             }
@@ -1343,7 +1327,7 @@
                     source: displaySource,
                     headers: headers,
                     behaviorHints: Object.keys(bh).length > 0 ? bh : undefined,
-                    subtitles: subs,  // ← Pass through subtitles
+                    subtitles: subs,
                     _sortKey: features._sortKey
                 });
                 if (hash) { fallbackResult.infoHash = hash; fallbackResult.fileIndex = 0; }
@@ -1352,6 +1336,7 @@
 
             return null;
         } catch (e) {
+            console.warn("[Hub] formatStream error:", e.message);
             return null;
         }
     }
@@ -1379,7 +1364,6 @@
         }
         return out;
     }
-
 
     // ────────────────────────────────────────────────────────────────
     //  SECTION 11: getHome() — Dashboard Catalogs
@@ -1413,7 +1397,6 @@
                 });
             }
 
-            // Step 1: Fetch all addon manifests (with caching)
             var manifests = await fetchManifests(addonUrls);
 
             if (!manifests.length) {
@@ -1424,7 +1407,6 @@
                 });
             }
 
-            // Step 2: Build catalog URLs from manifest definitions
             var catalogJobs = [];
             for (var mi = 0; mi < manifests.length; mi++) {
                 var mf = manifests[mi].manifest;
@@ -1443,7 +1425,6 @@
                     });
                     if (requiresSearch) continue;
 
-                    // Build catalog URL with optional pagination
                     var catUrl = addonBaseUrl + "/catalog/" + cat.type + "/" + cat.id + ".json";
                     if (pageNum > 1) {
                         var skip = (pageNum - 1) * CATALOG_PAGE_SIZE;
@@ -1467,11 +1448,9 @@
                 });
             }
 
-            // Step 3: Fetch all catalogs in parallel
             var catalogUrls = catalogJobs.map(function(j) { return j.url; });
             var catalogResponses = await httpBatch(catalogUrls);
 
-            // Step 4: Organize results by category name (preserving addon priority order)
             var organizedData = {};
             var categoryOrder = [];
 
@@ -1484,14 +1463,12 @@
                     continue;
                 }
 
-                // Convert Stremio meta items to SkyStream MultimediaItems
                 var items = response.data.metas
                     .map(function(m) { return toItem(m, job.categoryType); })
                     .filter(Boolean);
 
                 if (!items.length) continue;
 
-                // Use the category name as the key
                 var catLabel = job.categoryName;
 
                 // Only add category if not already seen (first addon wins)
@@ -1510,7 +1487,6 @@
                 });
             }
 
-            // Step 5: Build the response preserving the order categories were discovered
             var finalData = {};
             for (var i = 0; i < categoryOrder.length; i++) {
                 if (organizedData[categoryOrder[i]]) {
@@ -1529,7 +1505,6 @@
             });
         }
     }
-
 
     // ────────────────────────────────────────────────────────────────
     //  SECTION 12: search() — Multi-Addon Search
@@ -1551,14 +1526,19 @@
         try {
             var q = safeStr(query).trim().toLowerCase();
             if (!q) return cb({ success: true, data: [] });
+            if (q.length > MAX_SEARCH_QUERY_LENGTH) {
+                q = q.substring(0, MAX_SEARCH_QUERY_LENGTH);
+                console.warn("[Hub] Search query truncated to", MAX_SEARCH_QUERY_LENGTH, "chars");
+            }
 
-            var addonUrls = getCatalogueAddons();
+            // ★ FIXED: Use getMetaAddons() instead of getCatalogueAddons()
+            // This ensures search always queries Cinemeta (or configured meta addons)
+            // regardless of which addons are in catalogueAddons.
+            var addonUrls = getMetaAddons();
             if (!addonUrls.length) return cb({ success: true, data: [] });
 
-            // Step 1: Fetch manifests (cached)
             var manifests = await fetchManifests(addonUrls);
 
-            // Step 2: Build search URLs
             var searchJobs = [];
             for (var mi = 0; mi < manifests.length; mi++) {
                 var mf = manifests[mi].manifest;
@@ -1566,8 +1546,8 @@
 
                 if (!mf || !Array.isArray(mf.catalogs) || !mf.catalogs.length) continue;
 
-                var searchCats = [];   // Catalogs with native search support
-                var browseCats = [];   // Catalogs without search (for fallback)
+                var searchCats = [];
+                var browseCats = [];
 
                 for (var ci = 0; ci < mf.catalogs.length; ci++) {
                     var cat = mf.catalogs[ci];
@@ -1581,7 +1561,6 @@
                     }
                 }
 
-                // Add search-enabled catalogs with the search query parameter
                 for (var si = 0; si < searchCats.length; si++) {
                     searchJobs.push({
                         url: addonBaseUrl + "/catalog/" + searchCats[si].type + "/" +
@@ -1591,7 +1570,6 @@
                     });
                 }
 
-                // Add browse catalogs as fallback
                 for (var bi = 0; bi < browseCats.length; bi++) {
                     searchJobs.push({
                         url: addonBaseUrl + "/catalog/" + browseCats[bi].type + "/" +
@@ -1604,11 +1582,9 @@
 
             if (!searchJobs.length) return cb({ success: true, data: [] });
 
-            // Step 3: Fire all search requests in parallel
             var urls = searchJobs.map(function(j) { return j.url; });
             var responses = await httpBatch(urls);
 
-            // Step 4: Collect results (deduplicated)
             var allItems = [];
             var seenUrls = {};
 
@@ -1659,7 +1635,6 @@
         }
     }
 
-
     // ────────────────────────────────────────────────────────────────
     //  SECTION 13: load() — Full Metadata + Episode Resolution
     // ────────────────────────────────────────────────────────────────
@@ -1698,7 +1673,6 @@
                 });
             }
 
-            // Parse the video ID to understand its structure
             var parsed = parseVideoId(rawInput);
             var metaId = parsed ? parsed.id : rawInput;
             var knownType = parsed ? parsed.type : null;
@@ -1711,23 +1685,27 @@
                 });
             }
 
-            var addonUrls = getCatalogueAddons();
+            // ★ FIXED: Use getMetaAddons() instead of getCatalogueAddons()
+            // This ensures load() always queries Cinemeta (or configured meta addons)
+            // for rich metadata, independent of catalogueAddons.
+            var addonUrls = getMetaAddons();
             if (!addonUrls.length) {
-                // No addons — return minimal metadata so the UI doesn't break
                 return respondFallback(rawInput, knownType, cb);
             }
 
             // ── Step 1: Build metadata query URLs ──
             // If we know the type (e.g., series from a "tt:1:1" format), only
-            // query that type. If unknown, try all reasonable types.
+            // query that type. If unknown, try standard Stremio types.
+            // NOTE: We only use "movie" and "series" (the two standard Stremio 
+            // content types). Non-standard types like "anime", "tv", "channel"
+            // are omitted because most addons return 404 for them, wasting requests.
             var typesToTry = knownType
-                ? [knownType, "movie", "series", "anime"]
-                : ["movie", "series", "anime", "tv", "channel"];
+                ? [knownType, "movie", "series"]
+                : ["movie", "series"];
 
             var metaQueries = [];
             for (var ai = 0; ai < addonUrls.length; ai++) {
                 var addonBaseUrl = baseUrl(addonUrls[ai]);
-                // For service-prefixed IDs like "kitsu:7442", use the full ID
                 var queryId = encodeURIComponent(metaId);
                 for (var ti = 0; ti < typesToTry.length; ti++) {
                     metaQueries.push({
@@ -1744,13 +1722,16 @@
             // http_parallel may hang in the Dart runtime with many concurrent
             // URLs (sample plugins all use http_get exclusively). Each query
             // has an individual timeout so one slow addon doesn't block all.
-            var META_TIMEOUT = 15000; // 15s per metadata query
+            // 
+            // RENAMED to META_FETCH_TIMEOUT to avoid shadowing the global 
+            // META_TIMEOUT (8000ms) used for manifest fetching in getManifest().
+            var META_FETCH_TIMEOUT = 15000; // 15s per metadata query
             
             var metaFetchPromises = metaQueries.map(function(q) {
                 return new Promise(function(resolve) {
                     var timer = setTimeout(function() {
                         resolve({ ok: false, data: null, status: 0, url: q.url, query: q });
-                    }, META_TIMEOUT);
+                    }, META_FETCH_TIMEOUT);
                     
                     // Use http_get — proven reliable in all sample plugins
                     http_get(q.url, JSON_HEADERS).then(function(resp) {
@@ -1796,18 +1777,13 @@
 
                 if (!resp.ok || !resp.data) continue;
 
-                // The response can have "meta" (single) or "metas" (array)
                 var metaData = resp.data.meta || (Array.isArray(resp.data.metas) ? resp.data.metas[0] : null);
                 if (!metaData || !metaData.id) continue;
 
-                // Calculate relevance score
                 var score = 0;
 
-                // Bonus for correct type match
                 if (knownType && query.type === knownType) score += 2;
 
-                // Bonus if addon's idPrefixes match the video ID
-                // (We'd need the manifest for this — check cached manifest)
                 var cachedManifest = cacheGet("mf:" + query.addonUrl);
                 if (cachedManifest && Array.isArray(cachedManifest.idPrefixes)) {
                     for (var pi = 0; pi < cachedManifest.idPrefixes.length; pi++) {
@@ -1818,12 +1794,10 @@
                     }
                 }
 
-                // Bonus for having episodes (indicates it's a series result)
                 if (Array.isArray(metaData.videos) && metaData.videos.length > 0) {
                     score += 1;
                 }
 
-                // Bonus for having actual metadata vs stub data
                 if (metaData.name && metaData.name !== "Unknown" && metaData.name !== metaId) {
                     score += 1;
                 }
@@ -1834,17 +1808,15 @@
                 // from other addons that might have name+poster but no synopsis
                 var descText = safeStr(metaData.description || metaData.overview || metaData.synopsis || "");
                 if (descText.length > 20) {
-                    score += 2; // Rich description = high quality metadata
+                    score += 2;
                 } else if (descText.length > 0) {
-                    score += 1; // Short description = partial
+                    score += 1;
                 }
 
-                // Bonus for having cast (indicates complete metadata)
                 if (Array.isArray(metaData.cast) && metaData.cast.length > 0) {
                     score += 1;
                 }
 
-                // Bonus for having IMDB rating or score
                 if (metaData.imdbRating != null || metaData.score != null) {
                     score += 1;
                 }
@@ -1858,29 +1830,31 @@
                 });
             }
 
-            // Sort by score descending, then by addon priority (index)
             candidates.sort(function(a, b) {
                 if (b.score !== a.score) return b.score - a.score;
                 return a.addonIndex - b.addonIndex;
             });
 
             if (candidates.length > 0) {
-                // Use the best candidate
                 respondMeta(candidates[0].meta, metaId, cb, knownType);
             } else {
-                // No metadata found — return a fallback so the UI still works
                 respondFallback(rawInput, knownType, cb);
             }
 
             // ── Step 4: Pre-fetch streams in the background ──
             // When the user taps Play, the cached result is used immediately.
             // This gives the illusion of "instant" stream loading.
+            //
+            // ★ FIXED: Use rawInput (full ID with season:episode) instead of metaId 
+            // (base content ID) as the cache key. This prevents cross-episode cache
+            // poisoning where streams for one episode get cached for all episodes.
             try {
                 loadStreams(rawInput, function(streamResult) {
-                    cacheSet("streams:" + metaId, streamResult);
+                    cacheSet("streams:" + rawInput, streamResult);
                 });
             } catch (e) {
                 // Pre-fetch is best-effort; don't block the UI
+                console.warn("[Hub] Stream pre-fetch failed for", rawInput, ":", e.message);
             }
 
         } catch (e) {
@@ -1939,7 +1913,6 @@
             var stremioType = meta.type || knownType || "movie";
             var skyTypeVal = skyType(stremioType);
 
-            // Parse basic metadata
             var year = parseYear(meta);
             var score = parseRating(meta);
             var description = safeStr(meta.description || meta.overview || meta.synopsis || "")
@@ -1969,7 +1942,6 @@
                             airDate: v.released || v.firstAired || ""
                         }));
                     } catch (e) {
-                        // Skip invalid episode entries
                     }
                 }
             }
@@ -2066,7 +2038,6 @@
 
         } catch (e) {
             console.error("[Hub] respondMeta error:", e.message);
-            // Fallback on error — include posterUrl to prevent blank screen
             var ft = skyType(meta.type || "movie");
             cb({
                 success: true,
@@ -2085,7 +2056,6 @@
             });
         }
     }
-
 
     // ────────────────────────────────────────────────────────────────
     //  SECTION 14: loadStreams() — Stream Resolution Engine
@@ -2117,7 +2087,6 @@
      * @param {Function} cb - Callback with { success, data }
      */
     async function loadStreams(url, cb) {
-        // Ensure callback is only called once (prevent double-fire)
         var callbackCalled = false;
         function safeCallback(result) {
             if (!callbackCalled) {
@@ -2143,26 +2112,31 @@
                 episode = 0;
             }
 
-            // Determine Stremio stream type
             var streamType = (mediaType === "tv" || mediaType === "series" || mediaType === "anime")
                 ? "series" : "movie";
 
-            // Get the list of streaming addons
             var addonUrls = getStreamingAddons();
             if (!addonUrls || !addonUrls.length) {
                 return safeCallback({ success: true, data: [] });
             }
 
-            // ── Step 2: Ignore cache — always fetch fresh from all addons ──
-            // Previously this served cached pre-fetched streams immediately and
-            // then did a background refresh, but the fresh data was dropped
-            // because safeCallback already fired. This caused users to only
-            // see partial results from fast addons. Now we always wait for
-            // ALL addons and return everything at once.
+            // ── Step 2: Check cache first (read-through cache) ──
+            // If the user already fetched streams for this video within the
+            // last STREAM_CACHE_TTL (3 min), serve the cached result instantly.
+            // This means ALL addon links from the first fetch are preserved
+            // — no slow addons are dropped, no re-fetch is needed.
+            // After 3 minutes the cache expires and we re-fetch everything.
+            var cacheKey = "streams:" + url;
+            var cached = cacheGet(cacheKey);
+            if (cached && cached.success && Array.isArray(cached.data)) {
+                var cachedAge = Date.now() - _cache[cacheKey].ts;
+                if (cachedAge < STREAM_CACHE_TTL) {
+                    safeCallback(cached);
+                    return;
+                }
+            }
 
             // ── Step 3: Build per-addon stream URLs ──
-            // Each streaming addon gets its own URL. For series episodes,
-            // the ID includes the season:episode suffix.
             var addonJobs = [];
             for (var ai = 0; ai < addonUrls.length; ai++) {
                 var addonBase = baseUrl(addonUrls[ai]);
@@ -2189,7 +2163,7 @@
             // Each addon gets its own timeout. We use Promise.allSettled-like
             // behavior: individual timeouts per addon, not a global one.
 
-            var addonStreamsMap = {}; // { addonIndex: { addonName, baseUrl, streams[] } }
+            var addonStreamsMap = {};
 
             // Fire all requests concurrently with individual timeouts
             var fetchPromises = [];
@@ -2198,7 +2172,6 @@
                 // were referencing the same `var job`, getting the last addon's values)
                 (function(job) {
                     var promise = httpBatch([job.url]).then(function(responses) {
-                        // httpBatch returns array aligned to input
                         return { job: job, response: responses[0] };
                     });
 
@@ -2216,7 +2189,6 @@
             // Wait for ALL addons to either respond or timeout
             var fetchResults = await Promise.all(fetchPromises);
 
-            // Debug: log per-addon results
             var addonsResponded = 0;
             var addonsSkipped = 0;
             for (var fri = 0; fri < fetchResults.length; fri++) {
@@ -2251,7 +2223,6 @@
             console.log("[Hub] loadStreams(" + metaId + "): " + addonsResponded +
                         " addons responded, " + addonsSkipped + " skipped/timed out");
 
-            // Process each addon's response
             // For 3xx redirects, try to follow the redirect to get actual stream data
             var redirectFollowPromises = [];
 
@@ -2264,8 +2235,6 @@
                 if (resp && resp.ok && resp.data &&
                     Array.isArray(resp.data.streams) && resp.data.streams.length > 0) {
 
-                    // Use URL-derived name for the [Tag] (identifies the config source).
-                    // The stream's own name appears in the content via formatStream.
                     var effectiveName = j.addonName;
 
                     if (!addonStreamsMap[j.addonIndex]) {
@@ -2283,13 +2252,11 @@
 
                 // Case 2: Redirect response — try to follow the redirect
                 if (resp && resp.redirectUrl && isHttp(resp.redirectUrl)) {
-                    // Store the promise so we can await all redirects
                     var redirectPromise = (function(job, redirectUrl) {
                         return httpBatch([redirectUrl]).then(function(redirectResponses) {
                             var rr = redirectResponses[0];
                             if (rr && rr.ok && rr.data &&
                                 Array.isArray(rr.data.streams) && rr.data.streams.length > 0) {
-                                // Use URL-derived name for the [Tag]; stream name appears in content
                                 var effectiveName = job.addonName;
                                 if (!addonStreamsMap[job.addonIndex]) {
                                     addonStreamsMap[job.addonIndex] = {
@@ -2308,24 +2275,18 @@
                 }
             }
 
-            // Wait for all redirect follow-ups to complete
             if (redirectFollowPromises.length > 0) {
                 await Promise.all(redirectFollowPromises);
             }
 
             // ── Step 5: Merge streams in addon priority order ──
-            // Concatenate in addon priority (first addon = top), preserving
-            // each addon's own stream order. Tag each stream with its addon index.
-
             var mergedStreams = [];
             for (var ai = 0; ai < addonUrls.length; ai++) {
                 var entry = addonStreamsMap[ai];
                 if (entry && entry.streams.length > 0) {
-                    // Tag each stream with its addon index for per-addon dedup
                     for (var ei = 0; ei < entry.streams.length; ei++) {
                         entry.streams[ei]._addonIndex = ai;
                     }
-                    // Preserve addon's own stream order — no quality re-sorting
                     mergedStreams = mergedStreams.concat(entry.streams);
                 }
             }
@@ -2357,11 +2318,12 @@
                 }
             }
 
-            // Cache the result for subsequent calls
+            // Cache the full result for up to 3 minutes.
+            // Next tap on play/download within 3 min returns instantly
+            // with ALL links from every addon (no links left behind).
             var result = { success: true, data: deduplicated };
-            cacheSet("streams:" + metaId, result);
+            cacheSet(cacheKey, result);
 
-            // Only call callback if we haven't already (cached may have been sent)
             if (!callbackCalled) {
                 safeCallback(result);
             }
@@ -2376,7 +2338,6 @@
         }
     }
 
-
     // ────────────────────────────────────────────────────────────────
     //  SECTION 15: EXPORTS
     // ────────────────────────────────────────────────────────────────
@@ -2388,7 +2349,8 @@
     globalThis.load = load;
     globalThis.loadStreams = loadStreams;
 
-    console.log("[Hub] Stremio Hub v5 loaded — " + getCatalogueAddons().length +
-                " catalogue addons, " + getStreamingAddons().length + " streaming addons");
+    console.log("[Hub] Stremio Hub v6 loaded — " + getCatalogueAddons().length +
+                " catalogue addons, " + getMetaAddons().length + " meta addons, " +
+                getStreamingAddons().length + " streaming addons");
 
 })();
