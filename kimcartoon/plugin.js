@@ -57,18 +57,47 @@
 	// ── HTTP helpers (SDK-compatible) ──────────────────────────────────────
 
 	async function httpGet(url) {
-		var res = await http_get(url, HEADERS);
-		return res.body;
+		// Use axios with timeout when available (sandbox global),
+		// fall back to SDK http_get which doesn't support timeout options.
+		try {
+			var resp = await axios.get(url, {
+				headers: HEADERS,
+				timeout: 15000,
+			});
+			return typeof resp.data === "object"
+				? JSON.stringify(resp.data)
+				: String(resp.data);
+		} catch (_) {
+			// Fallback: use SDK http_get if axios fails
+			var res = await http_get(url, HEADERS);
+			return res.body;
+		}
 	}
 
 	async function httpPostJson(url, body) {
-		var res = await http_post(url, JSON_HEADERS, body);
-		return JSON.parse(res.body);
+		try {
+			var resp = await axios.post(url, body, {
+				headers: JSON_HEADERS,
+				timeout: 15000,
+			});
+			return resp.data;
+		} catch (_) {
+			var res = await http_post(url, JSON_HEADERS, body);
+			return JSON.parse(res.body);
+		}
 	}
 
 	async function httpGetJson(url) {
-		var res = await http_get(url, JSON_HEADERS);
-		return JSON.parse(res.body);
+		try {
+			var resp = await axios.get(url, {
+				headers: JSON_HEADERS,
+				timeout: 15000,
+			});
+			return resp.data;
+		} catch (_) {
+			var res = await http_get(url, JSON_HEADERS);
+			return JSON.parse(res.body);
+		}
 	}
 
 	// ── HTML Parsers ───────────────────────────────────────────────────────
@@ -344,20 +373,28 @@
 	async function getHome(cb) {
 		try {
 			var base = manifest.baseUrl;
-			var [latestHtml, newestHtml, popularHtml] = await Promise.all([
-				httpGet(base + "/CartoonList/LatestUpdate"),
-				httpGet(base + "/CartoonList/Newest"),
-				httpGet(base + "/CartoonList/MostPopular"),
-			]);
+			var urls = [
+				{ key: "Latest Updates", url: base + "/CartoonList/LatestUpdate" },
+				{ key: "New Cartoons", url: base + "/CartoonList/Newest" },
+				{ key: "Most Popular", url: base + "/CartoonList/MostPopular" },
+			];
 
-			cb({
-				success: true,
-				data: {
-					"Latest Updates": parseCartoonList(latestHtml),
-					"New Cartoons": parseCartoonList(newestHtml),
-					"Most Popular": parseCartoonList(popularHtml),
-				},
-			});
+			var results = await Promise.allSettled(
+				urls.map(function (u) {
+					return httpGet(u.url);
+				}),
+			);
+
+			var data = {};
+			for (var i = 0; i < results.length; i++) {
+				if (results[i].status === "fulfilled") {
+					data[urls[i].key] = parseCartoonList(results[i].value);
+				} else {
+					data[urls[i].key] = [];
+				}
+			}
+
+			cb({ success: true, data: data });
 		} catch (e) {
 			cb({
 				success: false,
