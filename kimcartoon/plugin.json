@@ -1,0 +1,21 @@
+{
+	"packageName": "dev.kimcartoon.plugin",
+	"name": "KimCartoon",
+	"version": 1,
+	"baseUrl": "https://kimcartoon.si",
+	"description": "Watch cartoons online free in high quality from KimCartoon. Browse latest, newest, and most popular cartoons with multiple server options and quality selections.",
+	"authors": ["SkyStream Dev"],
+	"languages": ["en"],
+	"categories": ["Cartoon", "Movies", "Anime"],
+	"iconUrl": "https://kimcartoon.si/themes/kim/images/favicon.ico",
+	"domains": [
+		{
+			"name": "kimcartoon.si",
+			"url": "https://kimcartoon.si"
+		},
+		{
+			"name": "kimcartoon.me",
+			"url": "https://kimcartoon.me"
+		}
+	]
+}
