@@ -11,16 +11,18 @@
 	var USER_AGENT =
 		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
+	var BASE = manifest.baseUrl;
+
 	var HEADERS = {
 		"User-Agent": USER_AGENT,
-		Referer: manifest.baseUrl + "/",
+		Referer: BASE + "/",
 		Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 		"Accept-Language": "en-US,en;q=0.5",
 	};
 
 	var JSON_HEADERS = {
 		"User-Agent": USER_AGENT,
-		Referer: manifest.baseUrl + "/",
+		Referer: BASE + "/",
 		Accept: "application/json, text/javascript, */*; q=0.01",
 		"X-Requested-With": "XMLHttpRequest",
 		"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
@@ -54,50 +56,21 @@
 			: text.substring(si + start.length, ei);
 	}
 
-	// ── HTTP helpers (SDK-compatible) ──────────────────────────────────────
+	// ── HTTP helpers (SDK primitives only, like reference plugins) ─────────
 
 	async function httpGet(url) {
-		// Use axios with timeout when available (sandbox global),
-		// fall back to SDK http_get which doesn't support timeout options.
-		try {
-			var resp = await axios.get(url, {
-				headers: HEADERS,
-				timeout: 15000,
-			});
-			return typeof resp.data === "object"
-				? JSON.stringify(resp.data)
-				: String(resp.data);
-		} catch (_) {
-			// Fallback: use SDK http_get if axios fails
-			var res = await http_get(url, HEADERS);
-			return res.body;
-		}
+		var res = await http_get(url, HEADERS);
+		return res.body || "";
 	}
 
 	async function httpPostJson(url, body) {
-		try {
-			var resp = await axios.post(url, body, {
-				headers: JSON_HEADERS,
-				timeout: 15000,
-			});
-			return resp.data;
-		} catch (_) {
-			var res = await http_post(url, JSON_HEADERS, body);
-			return JSON.parse(res.body);
-		}
+		var res = await http_post(url, JSON_HEADERS, body);
+		return JSON.parse(res.body);
 	}
 
 	async function httpGetJson(url) {
-		try {
-			var resp = await axios.get(url, {
-				headers: JSON_HEADERS,
-				timeout: 15000,
-			});
-			return resp.data;
-		} catch (_) {
-			var res = await http_get(url, JSON_HEADERS);
-			return JSON.parse(res.body);
-		}
+		var res = await http_get(url, JSON_HEADERS);
+		return JSON.parse(res.body);
 	}
 
 	// ── HTML Parsers ───────────────────────────────────────────────────────
@@ -134,7 +107,7 @@
 				items.push(
 					new MultimediaItem({
 						title: title,
-						url: url.indexOf("http") === 0 ? url : manifest.baseUrl + url,
+						url: url.indexOf("http") === 0 ? url : BASE + url,
 						posterUrl: posterUrl || "",
 						type: block.indexOf("ep-bg") !== -1 ? "series" : "movie",
 					}),
@@ -169,7 +142,7 @@
 				episodes.push(
 					new Episode({
 						name: epName,
-						url: epUrl.indexOf("http") === 0 ? epUrl : manifest.baseUrl + epUrl,
+						url: epUrl.indexOf("http") === 0 ? epUrl : BASE + epUrl,
 						season: 1,
 						episode: episodeNum,
 					}),
@@ -196,7 +169,7 @@
 				episodes.push(
 					new Episode({
 						name: epName,
-						url: epUrl.indexOf("http") === 0 ? epUrl : manifest.baseUrl + epUrl,
+						url: epUrl.indexOf("http") === 0 ? epUrl : BASE + epUrl,
 						season: 1,
 						episode: episodeNum2,
 					}),
@@ -209,8 +182,8 @@
 
 	/**
 	 * Extract video sources from a JWPlayer embed page HTML.
-	 * Looks for the `sources` array or `file` in player config.
-	 * Resolves goto.php redirect URLs to actual .m3u8 links.
+	 * Resolves goto.php redirect URLs (vhserver) to actual .m3u8 links
+	 * using axios if available in the sandbox.
 	 */
 	async function extractJWPlayerSources(html) {
 		var streams = [];
@@ -233,12 +206,10 @@
 
 		// Pattern 2: standalone file key for HLS (not inside sources array)
 		if (streams.length === 0) {
-			// Exclude sources already found in Pattern 1 by matching outside arrays
 			var fileMatch = html.match(
 				/(?:file|"file")\s*:\s*"([^"]+\.(?:m3u8|mp4)[^"]*)"/,
 			);
 			if (fileMatch) {
-				// Make sure this isn't inside a sources array (already handled by Pattern 1)
 				var before = html.substring(
 					Math.max(0, html.indexOf(fileMatch[0]) - 200),
 					html.indexOf(fileMatch[0]),
@@ -252,17 +223,14 @@
 			}
 		}
 
-		// Resolve goto.php redirect URLs to actual HLS URLs
+		// Resolve goto.php redirect URLs using axios (may not be available in all runtimes)
 		for (var s = 0; s < streams.length; s++) {
-			if (
-				streams[s].url.indexOf("/goto.php") !== -1 ||
-				streams[s].url.indexOf("goto.php") !== -1
-			) {
+			if (streams[s].url.indexOf("goto.php") !== -1) {
 				try {
 					var redirectResp = await axios.get(streams[s].url, {
 						headers: {
 							"User-Agent": USER_AGENT,
-							Referer: manifest.baseUrl + "/",
+							Referer: BASE + "/",
 						},
 						maxRedirects: 0,
 						validateStatus: function (status) {
@@ -289,8 +257,7 @@
 		var streams = [];
 
 		try {
-			var loadUrl =
-				manifest.baseUrl + "/ajax/anime/load_episodes_v2?s=" + serverId;
+			var loadUrl = BASE + "/ajax/anime/load_episodes_v2?s=" + serverId;
 			var loadData = await httpPostJson(loadUrl, "episode_id=" + episodeId);
 
 			if (!loadData || !loadData.status) return streams;
@@ -301,7 +268,7 @@
 				if (!iframeMatch) return streams;
 				var iframeSrc = iframeMatch[1];
 				if (iframeSrc.indexOf("http") !== 0) {
-					iframeSrc = manifest.baseUrl + iframeSrc;
+					iframeSrc = BASE + iframeSrc;
 				}
 
 				// Try loadExtractor for known video hosts (MixDrop, StreamTape, Hydrax, etc.)
@@ -337,7 +304,7 @@
 			if (loadData.value) {
 				var valueUrl = loadData.value;
 				if (valueUrl.indexOf("http") !== 0) {
-					valueUrl = manifest.baseUrl + valueUrl;
+					valueUrl = BASE + valueUrl;
 				}
 
 				try {
@@ -355,7 +322,10 @@
 								});
 							}
 						} else if (pl.file) {
-							streams.push({ url: pl.file, quality: serverLabel });
+							streams.push({
+								url: pl.file,
+								quality: serverLabel,
+							});
 						}
 					}
 				} catch (_) {}
@@ -368,37 +338,34 @@
 	// ── Core Plugin Functions ──────────────────────────────────────────────
 
 	/**
-	 * getHome: Returns 3 categories from the site.
+	 * getHome: Returns categories from the site.
+	 * Uses sequential fetching with per-category try/catch,
+	 * matching the pattern used by reference SkyStream plugins (YTS, etc.).
 	 */
 	async function getHome(cb) {
 		try {
-			var base = manifest.baseUrl;
-			var urls = [
-				{ key: "Latest Updates", url: base + "/CartoonList/LatestUpdate" },
-				{ key: "New Cartoons", url: base + "/CartoonList/Newest" },
-				{ key: "Most Popular", url: base + "/CartoonList/MostPopular" },
+			var sections = [
+				{ key: "Latest Updates", url: BASE + "/CartoonList/LatestUpdate" },
+				{ key: "New Cartoons", url: BASE + "/CartoonList/Newest" },
+				{ key: "Most Popular", url: BASE + "/CartoonList/MostPopular" },
 			];
 
-			var results = await Promise.allSettled(
-				urls.map(function (u) {
-					return httpGet(u.url);
-				}),
-			);
-
 			var data = {};
-			for (var i = 0; i < results.length; i++) {
-				if (results[i].status === "fulfilled") {
-					data[urls[i].key] = parseCartoonList(results[i].value);
-				} else {
-					data[urls[i].key] = [];
-				}
+			for (var i = 0; i < sections.length; i++) {
+				try {
+					var html = await httpGet(sections[i].url);
+					var items = parseCartoonList(html);
+					if (items.length > 0) {
+						data[sections[i].key] = items;
+					}
+				} catch (_) {}
 			}
 
 			cb({ success: true, data: data });
 		} catch (e) {
 			cb({
 				success: false,
-				errorCode: "INTERNAL_ERROR",
+				errorCode: "SITE_OFFLINE",
 				message: e.message || "Unknown error in getHome",
 			});
 		}
@@ -409,14 +376,14 @@
 	 */
 	async function search(query, cb) {
 		try {
-			var url = manifest.baseUrl + "/Search/?s=" + encodeURIComponent(query);
+			var url = BASE + "/Search/?s=" + encodeURIComponent(query);
 			var html = await httpGet(url);
 			var items = parseCartoonList(html);
 			cb({ success: true, data: items });
 		} catch (e) {
 			cb({
 				success: false,
-				errorCode: "INTERNAL_ERROR",
+				errorCode: "PARSE_ERROR",
 				message: e.message || "Unknown error in search",
 			});
 		}
@@ -494,7 +461,7 @@
 		} catch (e) {
 			cb({
 				success: false,
-				errorCode: "INTERNAL_ERROR",
+				errorCode: "PARSE_ERROR",
 				message: e.message || "Unknown error in load",
 			});
 		}
@@ -548,7 +515,7 @@
 						new StreamResult({
 							url: stream.url,
 							quality: stream.quality || "auto",
-							headers: { Referer: manifest.baseUrl + "/" },
+							headers: { Referer: BASE + "/" },
 						}),
 					);
 				}
@@ -558,7 +525,7 @@
 		} catch (e) {
 			cb({
 				success: false,
-				errorCode: "INTERNAL_ERROR",
+				errorCode: "PARSE_ERROR",
 				message: e.message || "Unknown error in loadStreams",
 			});
 		}
