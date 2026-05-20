@@ -2,9 +2,9 @@
   {
     "packageName": "dev.sunriseve.onlytorrents",
     "name": "OnlyTorrents🧲",
-    "version": 1,
+    "version": 2,
     "baseUrl": "https://stremio-hub.local",
-    "description": "Aggregator for 22 curated HTTP streaming addons (English & Indian content) + high-speed torrent addons. HTTP sources prioritized for instant direct streaming. v6.0 — Fixed search/load: now uses dedicated metaAddons (Cinemeta) for search & metadata, independent of catalogueAddons (which provide home categories only).",
+    "description": "v7.3 — Production-ready hub with smart ID routing (tt→Cinemeta, tmdb:→TMDB addon, 1-2 requests per lookup). Cast photos, streaming-safe episode URLs, Indian regional catalogs.",
     "authors": [
       "Cookie🍪"
     ],
@@ -27,7 +27,8 @@
       "https://indian-regional-catalog.vercel.app/eyJjYXRhbG9ncyI6WyJ0ZSIsImhpIiwidGVfc2VyaWVzIiwiaGlfc2VyaWVzIiwib3R0X3JlbGVhc2VzIl0sImluY2x1ZGVUaGVhdHJpY2FsIjp0cnVlfQ==/manifest.json"
     ],
     "metaAddons": [
-      "https://v3-cinemeta.strem.io/manifest.json"
+      "https://v3-cinemeta.strem.io/manifest.json",
+      "https://tmdb.elfhosted.com/manifest.json"
     ],
     "streamingAddons": [
       "https://5a0d1888fa64-orion.baby-beamup.club/eyJhcGkiOiJWTEVMSDVCTkpSS1U4REJUSkdRODZVTjVNTkVMRkNGUyIsImxpbmtMaW1pdCI6IjEwIiwic29ydFZhbHVlIjoic3RyZWFtc2VlZHMiLCJhdWRpb2NoYW5uZWxzIjoiMiw2LDgiLCJ2aWRlb3F1YWxpdHkiOiJoZDRrLGhkMmssaGQxMDgwLGhkNzIwLHNkIiwibGlzdE9wdCI6InRvcnJlbnQiLCJkZWJyaWRzZXJ2aWNlcyI6W10sImF1ZGlvbGFuZ3VhZ2VzIjpbXSwiYWRkaXRpb25hbFBhcmFtZXRlcnMiOiIifQ/manifest.json",
