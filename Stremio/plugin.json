@@ -1,30 +1,30 @@
 {
-  "packageName": "dev.sunriseve.onlytorrents",
-  "name": "OnlyTorrents🧲",
-  "version": 1,
-  "baseUrl": "https://stremio-hub.local",
-  "description": "Aggregator for 22 curated HTTP streaming addons (English & Indian content) + high-speed torrent addons. HTTP sources prioritized for instant direct streaming. v6.0 — Fixed search/load: now uses dedicated metaAddons (Cinemeta) for search & metadata, independent of catalogueAddons (which provide home categories only).",
-  "authors": ["Cookie\ud83c\udf6a"],
-  "languages": ["en", "hi", "te", "ta", "ml", "kn", "bn"],
-  "categories": ["Movies", "TV", "Anime", "Indian"],
+	"packageName": "dev.sunriseve.onlytorrents",
+	"name": "OnlyTorrents🧲",
+	"version": 2,
+	"baseUrl": "https://stremio-hub.local",
+	"description": "v7.3 — Production-ready hub with smart ID routing (tt→Cinemeta, tmdb:→TMDB addon, 1-2 requests per lookup). Cast photos, streaming-safe episode URLs, Indian regional catalogs.",
+	"authors": ["Cookie🍪"],
+	"languages": ["en", "hi", "te", "ta", "ml", "kn", "bn"],
+	"categories": ["Movies", "TV", "Anime", "Indian"],
 
-  "catalogueAddons": [
-    "https://indian-regional-catalog.vercel.app/eyJjYXRhbG9ncyI6WyJ0ZSIsImhpIiwidGVfc2VyaWVzIiwiaGlfc2VyaWVzIiwib3R0X3JlbGVhc2VzIl0sImluY2x1ZGVUaGVhdHJpY2FsIjp0cnVlfQ==/manifest.json"
-  ],
+	"catalogueAddons": [
+		"https://indian-regional-catalog.vercel.app/eyJjYXRhbG9ncyI6WyJ0ZSIsImhpIiwidGVfc2VyaWVzIiwiaGlfc2VyaWVzIiwib3R0X3JlbGVhc2VzIl0sImluY2x1ZGVUaGVhdHJpY2FsIjp0cnVlfQ==/manifest.json"
+	],
 
-  "metaAddons": [
-    "https://v3-cinemeta.strem.io/manifest.json"
-  ],
+	"metaAddons": [
+		"https://v3-cinemeta.strem.io/manifest.json",
+		"https://tmdb.elfhosted.com/manifest.json"
+	],
 
-  "streamingAddons": [
-    
-    "https://5a0d1888fa64-orion.baby-beamup.club/eyJhcGkiOiJWTEVMSDVCTkpSS1U4REJUSkdRODZVTjVNTkVMRkNGUyIsImxpbmtMaW1pdCI6IjEwIiwic29ydFZhbHVlIjoic3RyZWFtc2VlZHMiLCJhdWRpb2NoYW5uZWxzIjoiMiw2LDgiLCJ2aWRlb3F1YWxpdHkiOiJoZDRrLGhkMmssaGQxMDgwLGhkNzIwLHNkIiwibGlzdE9wdCI6InRvcnJlbnQiLCJkZWJyaWRzZXJ2aWNlcyI6W10sImF1ZGlvbGFuZ3VhZ2VzIjpbXSwiYWRkaXRpb25hbFBhcmFtZXRlcnMiOiIifQ/manifest.json",
-    "https://torrentsdb.com/eyJwcm92aWRlcnMiOlsieXRzIiwiZXp0diIsIjEzMzd4IiwidG9ycmVudGNzdiIsIjFsb3UiLCJueWFhIiwic2t0b3JyZW50IiwiMXRhbWlsYmxhc3RlcnMiLCIxdGFtaWxtdiIsInJhcmdiIiwia25hYmVuIiwidGhlcGlyYXRlYmF5Iiwia2lja2Fzc3RvcnJlbnRzIiwiYW5pbWV0b3NobyIsImV4dHJlbWx5bXRvcnJlbnRzIiwieWdndG9ycmVudCIsInRva3lvdG9zaG8iXSwic29ydCI6InNlZWRlcnMiLCJxdWFsaXR5ZmlsdGVyIjpbIjEwODBwIiwiNzIwcCIsIjQ4MHAiLCI0ayJdLCJsaW1pdCI6IjEwIiwic2l6ZWZpbHRlciI6IjE1MzY1In0=/manifest.json",
-    "https://filmora-production.up.railway.app/manifest.json",
-    "https://watcho3.rafaelzioneverest.workers.dev/manifest.json",
-    "https://astral-mu-two.vercel.app/manifest.json",
-    "https://thebeginningjuststarted.xyz/5f5b2c7060f6cf0a/manifest.json",
-    "https://cinnn.vercel.app/manifest.json",
-    "https://torrentclaw.com/api/stremio/eyJsYW5nIjoiZW4iLCJzb3J0Ijoic2VlZGVycyJ9/manifest.json"
-  ]
+	"streamingAddons": [
+		"https://5a0d1888fa64-orion.baby-beamup.club/eyJhcGkiOiJWTEVMSDVCTkpSS1U4REJUSkdRODZVTjVNTkVMRkNGUyIsImxpbmtMaW1pdCI6IjEwIiwic29ydFZhbHVlIjoic3RyZWFtc2VlZHMiLCJhdWRpb2NoYW5uZWxzIjoiMiw2LDgiLCJ2aWRlb3F1YWxpdHkiOiJoZDRrLGhkMmssaGQxMDgwLGhkNzIwLHNkIiwibGlzdE9wdCI6InRvcnJlbnQiLCJkZWJyaWRzZXJ2aWNlcyI6W10sImF1ZGlvbGFuZ3VhZ2VzIjpbXSwiYWRkaXRpb25hbFBhcmFtZXRlcnMiOiIifQ/manifest.json",
+		"https://torrentsdb.com/eyJwcm92aWRlcnMiOlsieXRzIiwiZXp0diIsIjEzMzd4IiwidG9ycmVudGNzdiIsIjFsb3UiLCJueWFhIiwic2t0b3JyZW50IiwiMXRhbWlsYmxhc3RlcnMiLCIxdGFtaWxtdiIsInJhcmdiIiwia25hYmVuIiwidGhlcGlyYXRlYmF5Iiwia2lja2Fzc3RvcnJlbnRzIiwiYW5pbWV0b3NobyIsImV4dHJlbWx5bXRvcnJlbnRzIiwieWdndG9ycmVudCIsInRva3lvdG9zaG8iXSwic29ydCI6InNlZWRlcnMiLCJxdWFsaXR5ZmlsdGVyIjpbIjEwODBwIiwiNzIwcCIsIjQ4MHAiLCI0ayJdLCJsaW1pdCI6IjEwIiwic2l6ZWZpbHRlciI6IjE1MzY1In0=/manifest.json",
+		"https://filmora-production.up.railway.app/manifest.json",
+		"https://watcho3.rafaelzioneverest.workers.dev/manifest.json",
+		"https://astral-mu-two.vercel.app/manifest.json",
+		"https://thebeginningjuststarted.xyz/5f5b2c7060f6cf0a/manifest.json",
+		"https://cinnn.vercel.app/manifest.json",
+		"https://torrentclaw.com/api/stremio/eyJsYW5nIjoiZW4iLCJzb3J0Ijoic2VlZGVycyJ9/manifest.json"
+	]
 }
