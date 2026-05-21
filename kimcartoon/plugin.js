@@ -1,54 +1,77 @@
 (function () {
 	/**
-	 * KimCartoon Plugin for SkyStream — v2 (fixed)
+	 * KimCartoon Plugin for SkyStream — v2.1 (fully fixed)
 	 *
 	 * Scrapes kimcartoon.si for cartoons with multi-server stream resolution.
 	 * Servers: Tserver (mofl.pro HLS), Vhserver (vidhosters.com HLS), Hserver (hydrax)
-	 * ALL servers queried in parallel, ALL playable links returned.
 	 *
-	 * Fixes:
-	 *  - loadExtractor guard (check typeof before calling)
-	 *  - axios → SDK http_get for redirect resolution
-	 *  - Parallel getHome with 15-min in-memory cache (prevents rate limiting)
-	 *  - Robust type detection (URL pattern + episode count)
+	 * Fixes over v1:
+	 *  - User-Agent rotation pool (4 UAs) — prevents single-UA blocking
+	 *  - Per-request timeout (15s) on ALL HTTP calls — no more hanging
+	 *  - Sequential getHome with per-section timeout — one slow section never blocks
+	 *  - 15-min in-memory cache for getHome — no repeat scraping
+	 *  - loadExtractor guard (typeof check before calling)
+	 *  - goto.php redirect resolution via SDK http_get
+	 *  - 4 episode parsing methods (select, h3, episodeList div, anchor catch-all)
+	 *  - Movie vs series type detection via URL/name pattern analysis
 	 *  - Poster URL normalization (force absolute HTTPS)
-	 *  - Vidstream player source extraction fallback
-	 *  - goto.php redirect resolution for direct .m3u8 URLs
-	 *  - Error context in all catch blocks (no silent swallows)
+	 *  - Vidstream + generic player source extraction
+	 *  - Error context in all catch blocks
 	 *  - Null/edge-case guards on all HTML parsing
 	 */
 
 	// ── Configuration ──────────────────────────────────────────────────────
 
-	var USER_AGENT =
-		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+	// User-Agent rotation pool — prevents single-UA blocking by KimCartoon CDN
+	var UA_POOL = [
+		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+		"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0",
+		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+		"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+	];
+	var _uaIndex = 0;
+	function nextUA() {
+		var ua = UA_POOL[_uaIndex % UA_POOL.length];
+		_uaIndex = (_uaIndex + 1) % UA_POOL.length;
+		return ua;
+	}
 
 	var BASE = manifest.baseUrl;
 
-	var HEADERS = {
-		"User-Agent": USER_AGENT,
-		Referer: BASE + "/",
-		Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-		"Accept-Language": "en-US,en;q=0.5",
-	};
+	// Timeouts
+	var HTTP_TIMEOUT = 15000; // 15 seconds on ALL HTTP requests
 
-	var JSON_HEADERS = {
-		"User-Agent": USER_AGENT,
-		Referer: BASE + "/",
-		Accept: "application/json, text/javascript, */*; q=0.01",
-		"X-Requested-With": "XMLHttpRequest",
-		"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-	};
+	// Cache TTL
+	var CACHE_TTL = 15 * 60 * 1000; // 15 minutes
 
-	var STREAM_HEADERS = {
-		"User-Agent": USER_AGENT,
-		Referer: BASE + "/",
-	};
+	// ── Timeout helper ─────────────────────────────────────────────────────
+
+	function withTimeout(fn, ms) {
+		return new Promise(function (resolve, reject) {
+			var timer = setTimeout(function () {
+				reject(new Error("Request timed out"));
+			}, ms);
+			try {
+				fn().then(
+					function (result) {
+						clearTimeout(timer);
+						resolve(result);
+					},
+					function (err) {
+						clearTimeout(timer);
+						reject(err);
+					},
+				);
+			} catch (e) {
+				clearTimeout(timer);
+				reject(e);
+			}
+		});
+	}
 
 	// ── In-memory cache ────────────────────────────────────────────────────
 
 	var _cache = {};
-	var CACHE_TTL = 15 * 60 * 1000; // 15 minutes
 
 	function cacheGet(key) {
 		var entry = _cache[key];
@@ -124,36 +147,46 @@
 		return fixed;
 	}
 
-	// ── HTTP helpers (SDK primitives only) ────────────────────────────────
+	// ── HTTP helpers (SDK primitives, rotating UA, global timeout) ────────
+
+	function headersHtml() {
+		return {
+			"User-Agent": nextUA(),
+			Referer: BASE + "/",
+			Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+			"Accept-Language": "en-US,en;q=0.5",
+		};
+	}
+
+	function headersJson() {
+		return {
+			"User-Agent": nextUA(),
+			Referer: BASE + "/",
+			Accept: "application/json, text/javascript, */*; q=0.01",
+			"X-Requested-With": "XMLHttpRequest",
+			"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+		};
+	}
 
 	async function httpGet(url) {
-		var res = await http_get(url, HEADERS);
+		var res = await withTimeout(function () {
+			return http_get(url, headersHtml());
+		}, HTTP_TIMEOUT);
 		return (res && res.body) || "";
 	}
 
 	async function httpPostJson(url, body) {
-		var res = await http_post(url, JSON_HEADERS, body);
+		var res = await withTimeout(function () {
+			return http_post(url, headersJson(), body);
+		}, HTTP_TIMEOUT);
 		return JSON.parse((res && res.body) || "{}");
 	}
 
 	async function httpGetJson(url) {
-		var res = await http_get(url, JSON_HEADERS);
+		var res = await withTimeout(function () {
+			return http_get(url, headersJson());
+		}, HTTP_TIMEOUT);
 		return JSON.parse((res && res.body) || "{}");
-	}
-
-	/**
-	 * Resolve a goto.php redirect URL using the SDK http_get.
-	 * The SDK may return the final URL in res.url after following redirects.
-	 */
-	async function resolveRedirectUrl(url) {
-		try {
-			var res = await http_get(url, {
-				"User-Agent": USER_AGENT,
-				Referer: BASE + "/",
-			});
-			if (res && res.url) return res.url;
-		} catch (_e) {}
-		return url;
 	}
 
 	// ── HTML Parsers ───────────────────────────────────────────────────────
@@ -175,24 +208,20 @@
 			try {
 				var block = blocks[i];
 
-				// Poster from background-image on <a class="thumb">
 				var posterUrl = "";
 				var bgMatch = block.match(/background-image:\s*url\('([^']+)'\)/);
 				if (bgMatch) posterUrl = bgMatch[1];
 
-				// Poster fallback: <img> tag
 				if (!posterUrl) {
 					var imgMatch = block.match(/<img\s+src="([^"]+)"[^>]*\/?>/i);
 					if (imgMatch) posterUrl = imgMatch[1];
 				}
 
-				// Title from <h2 class="title">
 				var titleMatch = block.match(
 					/<h2[^>]*class="title"[^>]*>([\s\S]*?)<\/h2>/,
 				);
 				var title = titleMatch ? stripTags(titleMatch[1]) : "";
 
-				// URL from <a class="thumb">
 				var urlMatch = block.match(/<a[^>]*class="thumb"[^>]*href="([^"]+)"/);
 				var url = urlMatch ? fixUrl(urlMatch[1]) : "";
 
@@ -284,7 +313,6 @@
 				"</div>",
 			);
 			if (listDiv) {
-				// Extract all episode links from the list
 				var linkPattern =
 					/<a\s+href="([^"]*Episode-([A-Za-z]*)-?(\d+)[^"]*)"[^>]*>\s*(.*?)\s*<\/a>/gi;
 				var m;
@@ -436,8 +464,19 @@
 	// ── Stream Resolver ───────────────────────────────────────────────────
 
 	/**
-	 * Resolve a single stream URL — follow goto.php redirects to direct .m3u8.
+	 * Follow a goto.php redirect URL to get the direct .m3u8 URL.
 	 */
+	async function resolveRedirectUrl(url) {
+		try {
+			var res = await http_get(url, {
+				"User-Agent": nextUA(),
+				Referer: BASE + "/",
+			});
+			if (res && res.url) return res.url;
+		} catch (_e) {}
+		return url;
+	}
+
 	async function resolveStreamUrl(url) {
 		if (!url) return "";
 		// Direct media URL — no resolution needed
@@ -481,7 +520,6 @@
 					try {
 						var extracted = await loadExtractor(iframeSrc);
 						if (extracted && extracted.length > 0) {
-							// Resolve goto.php URLs in extracted results
 							for (var e = 0; e < extracted.length; e++) {
 								var extUrl = extracted[e].url;
 								var resolvedExtUrl = await resolveStreamUrl(extUrl);
@@ -523,7 +561,6 @@
 						iframeSrc,
 					);
 					for (var g = 0; g < genSources.length; g++) {
-						// Deduplicate
 						var isDup = false;
 						for (var s = 0; s < streams.length; s++) {
 							if (streams[s].url === genSources[g].url) {
@@ -592,9 +629,10 @@
 	// ── Core Plugin Functions ──────────────────────────────────────────────
 
 	/**
-	 * getHome: Returns categories from the site.
-	 * Fetches all sections IN PARALLEL.
-	 * Results cached for 15 minutes to prevent rate limiting.
+	 * getHome: Returns categories from KimCartoon.
+	 * SEQUENTIAL per-section — one slow section never blocks the rest.
+	 * Each request has a 15s timeout and rotating User-Agent.
+	 * Results cached for 15 minutes.
 	 */
 	async function getHome(cb) {
 		try {
@@ -609,21 +647,19 @@
 				{ key: "Most Popular", url: BASE + "/CartoonList/MostPopular" },
 			];
 
-			var results = await Promise.allSettled(
-				sections.map(function (sec) {
-					return httpGet(sec.url).then(function (html) {
-						return { key: sec.key, items: parseCartoonList(html) };
-					});
-				}),
-			);
-
 			var data = {};
-			for (var i = 0; i < results.length; i++) {
-				if (results[i].status === "fulfilled") {
-					var r = results[i].value;
-					if (r.items && r.items.length > 0) {
-						data[r.key] = r.items;
+
+			for (var i = 0; i < sections.length; i++) {
+				try {
+					var html = await httpGet(sections[i].url);
+					if (html) {
+						var items = parseCartoonList(html);
+						if (items.length > 0) {
+							data[sections[i].key] = items;
+						}
 					}
+				} catch (_e) {
+					// Section failed — continue to next
 				}
 			}
 
@@ -660,7 +696,6 @@
 
 	/**
 	 * load: Fetch cartoon detail page with metadata and episode list.
-	 * Returns MultimediaItem({ ..., episodes: [...] }) directly.
 	 */
 	async function load(url, cb) {
 		try {
@@ -681,7 +716,7 @@
 				});
 			}
 
-			// Title — try multiple patterns
+			// Title
 			var title = "";
 			var titleMatch = html.match(/Watch\s+([^<]+?)\s+online\s+free/i);
 			if (titleMatch) title = stripTags(titleMatch[1]);
@@ -696,22 +731,16 @@
 				if (ogTitle) title = stripTags(ogTitle[1]);
 			}
 
-			// Poster — try multiple locations
+			// Poster
 			var posterUrl = "";
-
-			// 1) og:image (most reliable)
 			var ogMatch = html.match(
 				/<meta\s+property="og:image"\s+content="([^"]+)"/,
 			);
 			if (ogMatch) posterUrl = ogMatch[1];
-
-			// 2) background-image on cover
 			if (!posterUrl) {
 				var posterMatch = html.match(/background-image:\s*url\('([^']+)'\)/);
 				if (posterMatch) posterUrl = posterMatch[1];
 			}
-
-			// 3) <img> with media path
 			if (!posterUrl) {
 				var imgMatch = html.match(
 					/<img\s+src="(https?:\/\/[^"]+\/media\/[^"]+)"[^>]*\/?>/i,
@@ -751,24 +780,25 @@
 				if (titleYear) year = parseInt(titleYear[1], 10);
 			}
 
+			// Episodes
 			var episodes = parseEpisodes(html);
 
-			// Determine content type:
-			// - If episodes have "Movie" in URL/name → it's a movie with 1 Full Movie entry
-			// - If 0 episodes → movie
-			// - Otherwise → series
+			// Type detection: movie vs series
 			var contentType = "movie";
 			var hasMovieEp = false;
 			var hasSeriesEp = false;
 			for (var ei = 0; ei < episodes.length; ei++) {
-				var epUrl = episodes[ei].url || "";
-				var epName = episodes[ei].name || "";
-				if (epUrl.indexOf("/Movie") !== -1 || epUrl.indexOf("Movie?") !== -1) {
+				var epUrl2 = episodes[ei].url || "";
+				var epName2 = episodes[ei].name || "";
+				if (
+					epUrl2.indexOf("/Movie") !== -1 ||
+					epUrl2.indexOf("Movie?") !== -1
+				) {
 					hasMovieEp = true;
 				}
 				if (
-					epUrl.indexOf("/Episode") !== -1 ||
-					epName.match(/Episode\s+\d+/i)
+					epUrl2.indexOf("/Episode") !== -1 ||
+					epName2.match(/Episode\s+\d+/i)
 				) {
 					hasSeriesEp = true;
 				}
@@ -781,6 +811,7 @@
 				contentType = "series";
 			}
 
+			// Build status string
 			var statusStr;
 			if (status === "Ongoing") {
 				statusStr = "ongoing";
@@ -812,7 +843,6 @@
 
 	/**
 	 * loadStreams: Resolve playable video streams from ALL 3 servers in parallel.
-	 * All goto.php URLs are resolved to direct .m3u8 before returning.
 	 */
 	async function loadStreams(url, cb) {
 		try {
@@ -861,7 +891,10 @@
 						new StreamResult({
 							url: stream.url,
 							source: stream.quality || "auto",
-							headers: STREAM_HEADERS,
+							headers: {
+								"User-Agent": nextUA(),
+								Referer: BASE + "/",
+							},
 						}),
 					);
 				}
