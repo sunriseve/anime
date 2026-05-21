@@ -213,19 +213,12 @@
 
 				// ─── Handle HTTP redirects (301, 302, 307, 308) ───
 				if (status >= 300 && status < 400) {
-					if (hasLocation) {
+					if (hasLocation && hasLocation !== url) {
 						url = fixUrl(hasLocation);
 						i--;
 						continue;
 					}
 					if (i < retries) await delay(2000 * (i + 1));
-					continue;
-				}
-
-				// ─── Empty body with Location header — treat as redirect ───
-				if (!res.body && hasLocation) {
-					url = fixUrl(hasLocation);
-					i--;
 					continue;
 				}
 
@@ -261,19 +254,12 @@
 
 				// Handle redirects
 				if (status >= 300 && status < 400) {
-					if (hasLocation) {
-						url = fixUrl(location);
+					if (hasLocation && hasLocation !== url) {
+						url = fixUrl(hasLocation);
 						i--;
 						continue;
 					}
 					if (i < retries) await delay(2000 * (i + 1));
-					continue;
-				}
-
-				// Empty body + Location → treat as redirect
-				if (!res.body && hasLocation) {
-					url = fixUrl(hasLocation);
-					i--;
 					continue;
 				}
 
@@ -314,18 +300,12 @@
 					(res.headers && (res.headers.location || res.headers.Location));
 
 				if (status >= 300 && status < 400) {
-					if (hasLocation) {
+					if (hasLocation && hasLocation !== url) {
 						url = fixUrl(hasLocation);
 						i--;
 						continue;
 					}
 					if (i < retries) await delay(2000 * (i + 1));
-					continue;
-				}
-
-				if (!res.body && hasLocation) {
-					url = fixUrl(hasLocation);
-					i--;
 					continue;
 				}
 
