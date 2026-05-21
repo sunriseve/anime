@@ -4,8 +4,8 @@
 	 * @type {import('@skystream/sdk').Manifest}
 	 *
 	 * Scrapes kimcartoon.si for cartoons with multi-server stream resolution.
-	 * Servers: Tserver (mofl.pro HLS), Vhserver (vidhosters.com HLS), Hserver (hydrax/encrypted)
-	 * ALL servers are queried in parallel and ALL playable links returned.
+	 * Servers: Tserver (mofl.pro HLS), Vhserver (vidhosters.com HLS), Hserver (hydrax)
+	 * ALL servers queried in parallel, ALL playable links returned.
 	 */
 
 	var USER_AGENT =
@@ -56,7 +56,21 @@
 			: text.substring(si + start.length, ei);
 	}
 
-	// ── HTTP helpers (SDK primitives only, like reference plugins) ─────────
+	function stripTags(text) {
+		return String(text || "")
+			.replace(/<[^>]+>/g, "")
+			.trim();
+	}
+
+	function fixUrl(url) {
+		if (!url) return "";
+		if (url.indexOf("http") === 0) return url;
+		if (url.indexOf("//") === 0) return "https:" + url;
+		if (url.indexOf("/") === 0) return BASE + url;
+		return BASE + "/" + url;
+	}
+
+	// ── HTTP helpers (SDK primitives only) ────────────────────────────────
 
 	async function httpGet(url) {
 		var res = await http_get(url, HEADERS);
@@ -95,19 +109,17 @@
 				var titleMatch = block.match(
 					/<h2[^>]*class="title"[^>]*>([\s\S]*?)<\/h2>/,
 				);
-				var title = titleMatch
-					? titleMatch[1].replace(/<[^>]+>/g, "").trim()
-					: "";
+				var title = titleMatch ? stripTags(titleMatch[1]) : "";
 
 				var urlMatch = block.match(/<a[^>]*class="thumb"[^>]*href="([^"]+)"/);
-				var url = urlMatch ? urlMatch[1] : "";
+				var url = urlMatch ? fixUrl(urlMatch[1]) : "";
 
 				if (!title || !url) continue;
 
 				items.push(
 					new MultimediaItem({
 						title: title,
-						url: url.indexOf("http") === 0 ? url : BASE + url,
+						url: url,
 						posterUrl: posterUrl || "",
 						type: block.indexOf("ep-bg") !== -1 ? "series" : "movie",
 					}),
@@ -135,14 +147,14 @@
 				var epUrl = opt.substring(0, valEnd);
 				var labelStart = opt.indexOf(">", valEnd);
 				if (labelStart === -1) continue;
-				var epName = opt.substring(labelStart + 1).trim();
+				var epName = stripTags(opt.substring(labelStart + 1));
 				var episodeNum = i + 1;
 				var numMatch = epName.match(/Episode\s*(\d+)/i);
 				if (numMatch) episodeNum = parseInt(numMatch[1]);
 				episodes.push(
 					new Episode({
 						name: epName,
-						url: epUrl.indexOf("http") === 0 ? epUrl : BASE + epUrl,
+						url: fixUrl(epUrl),
 						season: 1,
 						episode: episodeNum,
 					}),
@@ -150,7 +162,7 @@
 			}
 		}
 
-		// Method 2: <h3> episode links (fallback for detail pages)
+		// Method 2: <h3> episode links (fallback)
 		if (episodes.length === 0) {
 			var h3blocks = extractAll(html, "<h3>", "</h3>");
 			for (var j = 0; j < h3blocks.length; j++) {
@@ -162,14 +174,14 @@
 				if (hrefEnd === -1) continue;
 				var epUrl = h3.substring(hrefStart, hrefEnd);
 				var nameStart = h3.indexOf(">", hrefEnd) + 1;
-				var epName = h3.substring(nameStart).replace(/<\/a>/, "").trim();
+				var epName = stripTags(h3.substring(nameStart).replace(/<\/a>/, ""));
 				var episodeNum2 = j + 1;
 				var numMatch2 = epName.match(/Episode\s*(\d+)/i);
 				if (numMatch2) episodeNum2 = parseInt(numMatch2[1]);
 				episodes.push(
 					new Episode({
 						name: epName,
-						url: epUrl.indexOf("http") === 0 ? epUrl : BASE + epUrl,
+						url: fixUrl(epUrl),
 						season: 1,
 						episode: episodeNum2,
 					}),
@@ -249,10 +261,6 @@
 
 	// ── Stream Resolver ───────────────────────────────────────────────────
 
-	/**
-	 * Resolve streams from a single server.
-	 * Flow: POST load_episodes_v2 → get iframe embed → fetch iframe → extract JWPlayer sources.
-	 */
 	async function resolveServerStreams(episodeId, serverId, serverLabel) {
 		var streams = [];
 
@@ -339,8 +347,7 @@
 
 	/**
 	 * getHome: Returns categories from the site.
-	 * Uses sequential fetching with per-category try/catch,
-	 * matching the pattern used by reference SkyStream plugins (YTS, etc.).
+	 * Sequential fetching with per-category try/catch (matching YTS/Cinevood pattern).
 	 */
 	async function getHome(cb) {
 		try {
@@ -381,16 +388,14 @@
 			var items = parseCartoonList(html);
 			cb({ success: true, data: items });
 		} catch (e) {
-			cb({
-				success: false,
-				errorCode: "PARSE_ERROR",
-				message: e.message || "Unknown error in search",
-			});
+			cb({ success: true, data: [] });
 		}
 	}
 
 	/**
 	 * load: Fetch cartoon detail page with metadata and episode list.
+	 * CRITICAL FIX: Returns MultimediaItem({ ..., episodes: [...] }) directly,
+	 * NOT { item: MultimediaItem, episodes: [...] } — matching SDK template and all reference plugins.
 	 */
 	async function load(url, cb) {
 		try {
@@ -399,10 +404,10 @@
 			// Title from heading
 			var title = "";
 			var titleMatch = html.match(/Watch\s+([^<]+?)\s+online\s+free/i);
-			if (titleMatch) title = titleMatch[1].trim();
+			if (titleMatch) title = stripTags(titleMatch[1]);
 			if (!title) {
 				var metaMatch = html.match(/<title>Watch\s+([^<]+?)\s+HD/i);
-				if (metaMatch) title = metaMatch[1].trim();
+				if (metaMatch) title = stripTags(metaMatch[1]);
 			}
 
 			// Poster
@@ -438,25 +443,25 @@
 			var episodes = parseEpisodes(html);
 			var contentType = episodes.length > 0 ? "series" : "movie";
 
+			// CRITICAL: Return MultimediaItem directly with episodes inside,
+			// matching the SDK template and all working reference plugins.
 			cb({
 				success: true,
-				data: {
-					item: new MultimediaItem({
-						title: title,
-						url: url,
-						posterUrl: posterUrl || "",
-						type: contentType,
-						description: description,
-						year: year || undefined,
-						status:
-							status === "Ongoing"
-								? "ongoing"
-								: status === "Completed"
-									? "completed"
-									: undefined,
-					}),
+				data: new MultimediaItem({
+					title: title,
+					url: url,
+					posterUrl: posterUrl || "",
+					type: contentType,
+					description: description,
+					year: year || undefined,
+					status:
+						status === "Ongoing"
+							? "ongoing"
+							: status === "Completed"
+								? "completed"
+								: undefined,
 					episodes: episodes,
-				},
+				}),
 			});
 		} catch (e) {
 			cb({
@@ -469,10 +474,7 @@
 
 	/**
 	 * loadStreams: Resolve playable video streams from ALL 3 servers in parallel.
-	 *
-	 * Queries: tserver, vhserver, hserver simultaneously.
-	 * For each: POST → get iframe → fetch iframe → extract HLS URLs from JWPlayer.
-	 * Returns ALL unique playable links across all servers.
+	 * CRITICAL FIX: StreamResult uses 'source' field (not 'quality') per SDK constructor.
 	 */
 	async function loadStreams(url, cb) {
 		try {
@@ -486,7 +488,6 @@
 			}
 			var episodeId = idMatch[1];
 
-			// All 3 servers queried in parallel
 			var serverConfigs = [
 				{ id: "tserver", label: "Tserver" },
 				{ id: "vhserver", label: "Vhserver" },
@@ -496,14 +497,12 @@
 			var allStreams = [];
 			var seenUrls = {};
 
-			// Query all servers in parallel
 			var serverResults = await Promise.allSettled(
 				serverConfigs.map(function (sv) {
 					return resolveServerStreams(episodeId, sv.id, sv.label);
 				}),
 			);
 
-			// Collect all unique streams
 			for (var r = 0; r < serverResults.length; r++) {
 				if (serverResults[r].status !== "fulfilled") continue;
 				var serverStreams = serverResults[r].value || [];
@@ -511,10 +510,11 @@
 					var stream = serverStreams[s];
 					if (!stream.url || seenUrls[stream.url]) continue;
 					seenUrls[stream.url] = true;
+					// CRITICAL: Use 'source' field (SDK StreamResult constructor accepts source, not quality)
 					allStreams.push(
 						new StreamResult({
 							url: stream.url,
-							quality: stream.quality || "auto",
+							source: stream.quality || "auto",
 							headers: { Referer: BASE + "/" },
 						}),
 					);
