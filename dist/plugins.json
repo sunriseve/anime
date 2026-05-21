@@ -2,9 +2,9 @@
   {
     "packageName": "dev.sunriseve.onlytorrents",
     "name": "OnlyTorrents🧲",
-    "version": 2,
+    "version": 3,
     "baseUrl": "https://stremio-hub.local",
-    "description": "v7.3 — Production-ready hub with smart ID routing (tt→Cinemeta, tmdb:→TMDB addon, 1-2 requests per lookup). Cast photos, streaming-safe episode URLs, Indian regional catalogs.",
+    "description": "v8 — Cinemeta-only (TMDB removed). Fastest metadata: tt→direct Cinemeta, tmdb:→pipe extraction. Cast photos, streaming-safe URLs, Indian regional catalogs.",
     "authors": [
       "Cookie🍪"
     ],
