@@ -1,6 +1,6 @@
 (function () {
 	/**
-	 * KimCartoon Plugin for SkyStream — v2.2 (fully fixed)
+	 * KimCartoon Plugin for SkyStream — v2.3 (fully fixed)
 	 *
 	 * Scrapes kimcartoon.si for cartoons with multi-server stream resolution.
 	 * Servers: Tserver (mofl.pro HLS), Vhserver (vidhosters.com HLS), Hserver (hydrax)
@@ -15,8 +15,9 @@
 	 *  - 4 episode parsing methods (select, h3, episodeList div, anchor catch-all)
 	 *  - Movie vs series type detection via URL/name pattern analysis
 	 *  - Poster URLs use img.cartooncdn.xyz CDN — reduces domain contention for faster loading
-	 *  - Vidstream + generic player source extraction
-	 *  - Error context in all catch blocks
+	 *  - vidstream + generic player source extraction
+	 *  - HTTP 301/302 redirect following in all httpGet/httpPostJson/httpGetJson
+	 *  - Error context in all catch blocks + exponential backoff retries
 	 *  - Null/edge-case guards on all HTML parsing
 	 */
 
@@ -153,6 +154,14 @@
 		return fixed;
 	}
 
+	// ── Delay helper ────────────────────────────────────────────────────────
+
+	function delay(ms) {
+		return new Promise(function (r) {
+			return setTimeout(r, ms);
+		});
+	}
+
 	// ── HTTP helpers (SDK primitives, rotating UA, global timeout) ────────
 
 	function headersHtml() {
@@ -174,6 +183,12 @@
 		};
 	}
 
+	/**
+	 * Fetch HTML page with retry + redirect following.
+	 * KimCartoon detail pages (short URLs) return HTTP 301 → canonical URL.
+	 * The SDK's http_get may not follow redirects, so we check status +
+	 * Location header and re-request the canonical URL automatically.
+	 */
 	async function httpGet(url, retries) {
 		if (retries === undefined) retries = 2;
 		for (var i = 0; i <= retries; i++) {
@@ -181,35 +196,158 @@
 				var res = await withTimeout(function () {
 					return http_get(url, headersHtml());
 				}, HTTP_TIMEOUT);
-				if (res && res.body) return res.body;
-				// Empty body — likely rate-limit / CAPTCHA, wait and retry
-				if (i < retries) {
-					await new Promise(function (r) {
-						return setTimeout(r, 1000 * (i + 1));
-					});
+
+				if (!res) {
+					// Null/undefined response — server may have dropped connection
+					if (i < retries) await delay(2000 * (i + 1));
+					continue;
 				}
+
+				var status = res.status || 0;
+				var hasLocation =
+					res.headers && (res.headers.location || res.headers.Location);
+
+				// ─── Handle HTTP redirects (301, 302, 307, 308) ───
+				// KimCartoon short URLs (e.g. /Cartoon/Family-Guy) return
+				// HTTP 301 → canonical URL with an empty body. The SDK's
+				// http_get may not follow redirects, so we extract the
+				// Location header and re-request the canonical URL.
+				if (status >= 300 && status < 400) {
+					var location = hasLocation || "";
+					if (location) {
+						url = fixUrl(location);
+						i--; // don't count as a retry
+						continue;
+					}
+					if (i < retries) await delay(2000 * (i + 1));
+					continue;
+				}
+
+				// ─── Empty body with Location header — treat as redirect ───
+				// Some SDKs may return status 200 but set a Location header
+				// when the server redirects internally.
+				if (!res.body && hasLocation) {
+					url = fixUrl(hasLocation);
+					i--;
+					continue;
+				}
+
+				// Success with body
+				if (res.body) return res.body;
+
+				// Empty body — wait and retry (rate-limit / CAPTCHA)
+				if (i < retries) await delay(2000 * (i + 1));
 			} catch (e) {
 				if (i >= retries) throw e;
-				await new Promise(function (r) {
-					return setTimeout(r, 1000 * (i + 1));
-				});
+				await delay(2000 * (i + 1));
 			}
 		}
 		return "";
 	}
 
-	async function httpPostJson(url, body) {
-		var res = await withTimeout(function () {
-			return http_post(url, headersJson(), body);
-		}, HTTP_TIMEOUT);
-		return JSON.parse((res && res.body) || "{}");
+	async function httpPostJson(url, body, retries) {
+		if (retries === undefined) retries = 2;
+		for (var i = 0; i <= retries; i++) {
+			try {
+				var res = await withTimeout(function () {
+					return http_post(url, headersJson(), body);
+				}, HTTP_TIMEOUT);
+
+				if (!res) {
+					if (i < retries) await delay(2000 * (i + 1));
+					continue;
+				}
+
+				var status = res.status || 0;
+				var hasLocation =
+					res.headers && (res.headers.location || res.headers.Location);
+
+				// Handle redirects
+				if (status >= 300 && status < 400) {
+					var location = hasLocation || "";
+					if (location) {
+						url = fixUrl(location);
+						i--;
+						continue;
+					}
+					if (i < retries) await delay(2000 * (i + 1));
+					continue;
+				}
+
+				// Empty body + Location → treat as redirect
+				if (!res.body && hasLocation) {
+					url = fixUrl(hasLocation);
+					i--;
+					continue;
+				}
+
+				// Return parsed JSON on success
+				if (res.body) {
+					try {
+						return JSON.parse(res.body);
+					} catch (_pe) {
+						return {};
+					}
+				}
+
+				if (i < retries) await delay(2000 * (i + 1));
+			} catch (e) {
+				if (i >= retries) throw e;
+				await delay(2000 * (i + 1));
+			}
+		}
+		return {};
 	}
 
-	async function httpGetJson(url) {
-		var res = await withTimeout(function () {
-			return http_get(url, headersJson());
-		}, HTTP_TIMEOUT);
-		return JSON.parse((res && res.body) || "{}");
+	async function httpGetJson(url, retries) {
+		if (retries === undefined) retries = 2;
+		for (var i = 0; i <= retries; i++) {
+			try {
+				var res = await withTimeout(function () {
+					return http_get(url, headersJson());
+				}, HTTP_TIMEOUT);
+
+				if (!res) {
+					if (i < retries) await delay(2000 * (i + 1));
+					continue;
+				}
+
+				var status = res.status || 0;
+				var hasLocation =
+					res.headers && (res.headers.location || res.headers.Location);
+
+				if (status >= 300 && status < 400) {
+					var location = hasLocation || "";
+					if (location) {
+						url = fixUrl(location);
+						i--;
+						continue;
+					}
+					if (i < retries) await delay(2000 * (i + 1));
+					continue;
+				}
+
+				if (!res.body && hasLocation) {
+					url = fixUrl(hasLocation);
+					i--;
+					continue;
+				}
+
+				if (res.body) {
+					try {
+						return JSON.parse(res.body);
+					} catch (_pe) {
+						return {};
+					}
+				}
+
+				if (i < retries) await delay(2000 * (i + 1));
+			} catch (e) {
+				if (i >= retries) throw e;
+				await delay(2000 * (i + 1));
+			}
+		}
+		return {};
 	}
 
 	// ── HTML Parsers ───────────────────────────────────────────────────────
@@ -511,17 +649,27 @@
 			}
 		} catch (_a) {}
 
-		// Method 2: SDK http_get — check if response has final URL after redirect
+		// Method 2: SDK http_get — check response status + headers + final URL
 		try {
 			var res = await http_get(url, {
 				"User-Agent": nextUA(),
 				Referer: BASE + "/",
 			});
 			if (res) {
+				// Check if response has redirect status with Location header
+				var status = res.status || 0;
+				if (status >= 300 && status < 400) {
+					if (res.headers) {
+						var loc = res.headers.location || res.headers.Location || "";
+						if (loc) return fixUrl(loc);
+					}
+				}
+				// Check if SDK followed redirect and set final URL
 				if (res.url && res.url !== url) return res.url;
+				// Check headers even for non-redirect status
 				if (res.headers) {
-					if (res.headers.location) return res.headers.location;
-					if (res.headers.Location) return res.headers.Location;
+					if (res.headers.location) return fixUrl(res.headers.location);
+					if (res.headers.Location) return fixUrl(res.headers.Location);
 				}
 			}
 		} catch (_h) {}
