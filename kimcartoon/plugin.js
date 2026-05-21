@@ -188,6 +188,10 @@
 	 * KimCartoon detail pages (short URLs) return HTTP 301 → canonical URL.
 	 * The SDK's http_get may not follow redirects, so we check status +
 	 * Location header and re-request the canonical URL automatically.
+	 *
+	 * Location can appear in the response as:
+	 *   res.location       — direct property (SkyStream SDK pattern)
+	 *   res.headers.{location|Location} — nested under headers
 	 */
 	async function httpGet(url, retries) {
 		if (retries === undefined) retries = 2;
@@ -198,25 +202,20 @@
 				}, HTTP_TIMEOUT);
 
 				if (!res) {
-					// Null/undefined response — server may have dropped connection
 					if (i < retries) await delay(2000 * (i + 1));
 					continue;
 				}
 
 				var status = res.status || 0;
 				var hasLocation =
-					res.headers && (res.headers.location || res.headers.Location);
+					res.location ||
+					(res.headers && (res.headers.location || res.headers.Location));
 
 				// ─── Handle HTTP redirects (301, 302, 307, 308) ───
-				// KimCartoon short URLs (e.g. /Cartoon/Family-Guy) return
-				// HTTP 301 → canonical URL with an empty body. The SDK's
-				// http_get may not follow redirects, so we extract the
-				// Location header and re-request the canonical URL.
 				if (status >= 300 && status < 400) {
-					var location = hasLocation || "";
-					if (location) {
-						url = fixUrl(location);
-						i--; // don't count as a retry
+					if (hasLocation) {
+						url = fixUrl(hasLocation);
+						i--;
 						continue;
 					}
 					if (i < retries) await delay(2000 * (i + 1));
@@ -224,8 +223,6 @@
 				}
 
 				// ─── Empty body with Location header — treat as redirect ───
-				// Some SDKs may return status 200 but set a Location header
-				// when the server redirects internally.
 				if (!res.body && hasLocation) {
 					url = fixUrl(hasLocation);
 					i--;
@@ -235,7 +232,6 @@
 				// Success with body
 				if (res.body) return res.body;
 
-				// Empty body — wait and retry (rate-limit / CAPTCHA)
 				if (i < retries) await delay(2000 * (i + 1));
 			} catch (e) {
 				if (i >= retries) throw e;
@@ -260,12 +256,12 @@
 
 				var status = res.status || 0;
 				var hasLocation =
-					res.headers && (res.headers.location || res.headers.Location);
+					res.location ||
+					(res.headers && (res.headers.location || res.headers.Location));
 
 				// Handle redirects
 				if (status >= 300 && status < 400) {
-					var location = hasLocation || "";
-					if (location) {
+					if (hasLocation) {
 						url = fixUrl(location);
 						i--;
 						continue;
@@ -314,12 +310,12 @@
 
 				var status = res.status || 0;
 				var hasLocation =
-					res.headers && (res.headers.location || res.headers.Location);
+					res.location ||
+					(res.headers && (res.headers.location || res.headers.Location));
 
 				if (status >= 300 && status < 400) {
-					var location = hasLocation || "";
-					if (location) {
-						url = fixUrl(location);
+					if (hasLocation) {
+						url = fixUrl(hasLocation);
 						i--;
 						continue;
 					}
@@ -639,12 +635,11 @@
 						return s >= 200 && s < 400;
 					},
 				});
-				if (
-					resp &&
-					resp.headers &&
-					(resp.headers.location || resp.headers.Location)
-				) {
-					return resp.headers.location || resp.headers.Location;
+				if (resp) {
+					var loc =
+						resp.location ||
+						(resp.headers && (resp.headers.location || resp.headers.Location));
+					if (loc) return loc;
 				}
 			}
 		} catch (_a) {}
@@ -656,21 +651,18 @@
 				Referer: BASE + "/",
 			});
 			if (res) {
-				// Check if response has redirect status with Location header
 				var status = res.status || 0;
+				// Check direct location property + headers for redirect
+				var loc =
+					res.location ||
+					(res.headers && (res.headers.location || res.headers.Location));
 				if (status >= 300 && status < 400) {
-					if (res.headers) {
-						var loc = res.headers.location || res.headers.Location || "";
-						if (loc) return fixUrl(loc);
-					}
+					if (loc) return fixUrl(loc);
 				}
 				// Check if SDK followed redirect and set final URL
 				if (res.url && res.url !== url) return res.url;
-				// Check headers even for non-redirect status
-				if (res.headers) {
-					if (res.headers.location) return fixUrl(res.headers.location);
-					if (res.headers.Location) return fixUrl(res.headers.Location);
-				}
+				// Even for non-redirect status, check location header
+				if (loc) return fixUrl(loc);
 			}
 		} catch (_h) {}
 
