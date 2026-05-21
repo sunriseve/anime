@@ -410,34 +410,54 @@
 				if (metaMatch) title = stripTags(metaMatch[1]);
 			}
 
-			// Poster
+			// Poster — detail page uses <img src> NOT background-image:url()
 			var posterUrl = "";
 			var posterMatch = html.match(/background-image:url\('([^']+)'\)/);
-			if (posterMatch) posterUrl = posterMatch[1];
+			if (posterMatch) {
+				posterUrl = posterMatch[1];
+			}
+			if (!posterUrl) {
+				// Fallback: <img src="..." alt="Title"> (detail page pattern)
+				var imgMatch = html.match(
+					/<img\s+src="(https?:\/\/[^"]+media\/imagesv2\/[^"]+)"[^>]*\/?>/,
+				);
+				if (imgMatch) posterUrl = imgMatch[1];
+			}
+			if (!posterUrl) {
+				// Fallback: og:image meta tag
+				var ogMatch = html.match(
+					/<meta\s+property="og:image"\s+content="([^"]+)"/,
+				);
+				if (ogMatch) posterUrl = ogMatch[1];
+			}
 
-			// Description
+			// Description — actual HTML: <span class="info">Summary:</span></p>...<div class="summary"><p>text</p></div>
 			var description = "";
-			var descMatch = html.match(/Summary:<\/strong>\s*([^<]+)</);
-			if (descMatch) description = descMatch[1].trim();
+			var summaryDiv = extractBetween(html, '<div class="summary">', "</div>");
+			if (summaryDiv) {
+				var pMatch = summaryDiv.match(/<p>([\s\S]*?)<\/p>/);
+				if (pMatch) description = stripTags(pMatch[1]).trim();
+			}
 			if (!description) {
+				// Fallback: og:description (SEO text, not ideal)
 				var ogDesc = html.match(
 					/<meta\s+property="og:description"\s+content="([^"]+)"/,
 				);
-				if (ogDesc) description = ogDesc[1];
+				if (ogDesc) description = stripTags(ogDesc[1]);
 			}
 
-			// Status
+			// Status — actual HTML: <span class="info">Status:</span> Ongoing
 			var status = "";
-			var statusMatch = html.match(/Status:<\/strong>\s*([^<]+)</);
+			var statusMatch = html.match(/Status:<\/span>\s*([^<]+)/);
 			if (statusMatch) status = statusMatch[1].trim();
 
-			// Year
+			// Year — actual HTML: <span class="info">Date aired:</span> 2026
 			var year = 0;
-			var yearMatch = title.match(/\((\d{4})\)/);
+			var yearMatch = html.match(/Date\s+aired:<\/span>\s*(\d{4})/);
 			if (yearMatch) year = parseInt(yearMatch[1]);
 			if (!year) {
-				var dateMatch = html.match(/Date aired:\s*(\d{4})/);
-				if (dateMatch) year = parseInt(dateMatch[1]);
+				var titleYear = title.match(/\((\d{4})\)/);
+				if (titleYear) year = parseInt(titleYear[1]);
 			}
 
 			var episodes = parseEpisodes(html);
