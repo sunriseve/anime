@@ -13,8 +13,7 @@
 	],
 
 	"metaAddons": [
-		"https://v3-cinemeta.strem.io/manifest.json",
-		"https://tmdb.elfhosted.com/manifest.json"
+		"https://v3-cinemeta.strem.io/manifest.json"
 	],
 
 	"streamingAddons": [
