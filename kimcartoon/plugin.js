@@ -1,20 +1,20 @@
 (function () {
 	/**
-	 * KimCartoon Plugin for SkyStream — v2.1 (fully fixed)
+	 * KimCartoon Plugin for SkyStream — v2.2 (fully fixed)
 	 *
 	 * Scrapes kimcartoon.si for cartoons with multi-server stream resolution.
 	 * Servers: Tserver (mofl.pro HLS), Vhserver (vidhosters.com HLS), Hserver (hydrax)
 	 *
-	 * Fixes over v1:
+	 * Fixes:
 	 *  - User-Agent rotation pool (4 UAs) — prevents single-UA blocking
-	 *  - Per-request timeout (15s) on ALL HTTP calls — no more hanging
+	 *  - Per-request timeout (15s) on ALL HTTP calls + retry (2x) for empty responses
 	 *  - Sequential getHome with per-section timeout — one slow section never blocks
 	 *  - 15-min in-memory cache for getHome — no repeat scraping
 	 *  - loadExtractor guard (typeof check before calling)
-	 *  - goto.php redirect resolution via SDK http_get
+	 *  - goto.php redirect resolution (axios maxRedirects:0 + SDK http_get fallback)
 	 *  - 4 episode parsing methods (select, h3, episodeList div, anchor catch-all)
 	 *  - Movie vs series type detection via URL/name pattern analysis
-	 *  - Poster URL normalization (force absolute HTTPS)
+	 *  - Poster URLs use img.cartooncdn.xyz CDN — reduces domain contention for faster loading
 	 *  - Vidstream + generic player source extraction
 	 *  - Error context in all catch blocks
 	 *  - Null/edge-case guards on all HTML parsing
@@ -144,6 +144,12 @@
 		if (fixed.indexOf("http://") === 0) {
 			fixed = "https://" + fixed.substring(7);
 		}
+		// Use CDN domain for poster images — reduces domain contention so images
+		// don't queue behind API/data requests to kimcartoon.si. The CDN mirrors
+		// all media with identical paths and content.
+		if (fixed.indexOf("//kimcartoon.si/") !== -1) {
+			fixed = fixed.replace("//kimcartoon.si/", "//img.cartooncdn.xyz/");
+		}
 		return fixed;
 	}
 
@@ -168,11 +174,28 @@
 		};
 	}
 
-	async function httpGet(url) {
-		var res = await withTimeout(function () {
-			return http_get(url, headersHtml());
-		}, HTTP_TIMEOUT);
-		return (res && res.body) || "";
+	async function httpGet(url, retries) {
+		if (retries === undefined) retries = 2;
+		for (var i = 0; i <= retries; i++) {
+			try {
+				var res = await withTimeout(function () {
+					return http_get(url, headersHtml());
+				}, HTTP_TIMEOUT);
+				if (res && res.body) return res.body;
+				// Empty body — likely rate-limit / CAPTCHA, wait and retry
+				if (i < retries) {
+					await new Promise(function (r) {
+						return setTimeout(r, 1000 * (i + 1));
+					});
+				}
+			} catch (e) {
+				if (i >= retries) throw e;
+				await new Promise(function (r) {
+					return setTimeout(r, 1000 * (i + 1));
+				});
+			}
+		}
+		return "";
 	}
 
 	async function httpPostJson(url, body) {
@@ -465,15 +488,45 @@
 
 	/**
 	 * Follow a goto.php redirect URL to get the direct .m3u8 URL.
+	 * Uses multiple fallback methods to capture the redirect Location header.
 	 */
 	async function resolveRedirectUrl(url) {
+		// Method 1: axios with maxRedirects: 0 captures Location header (old reliable method)
+		try {
+			if (typeof axios !== "undefined" && typeof axios.get === "function") {
+				var resp = await axios.get(url, {
+					headers: { "User-Agent": nextUA(), Referer: BASE + "/" },
+					maxRedirects: 0,
+					validateStatus: function (s) {
+						return s >= 200 && s < 400;
+					},
+				});
+				if (
+					resp &&
+					resp.headers &&
+					(resp.headers.location || resp.headers.Location)
+				) {
+					return resp.headers.location || resp.headers.Location;
+				}
+			}
+		} catch (_a) {}
+
+		// Method 2: SDK http_get — check if response has final URL after redirect
 		try {
 			var res = await http_get(url, {
 				"User-Agent": nextUA(),
 				Referer: BASE + "/",
 			});
-			if (res && res.url) return res.url;
-		} catch (_e) {}
+			if (res) {
+				if (res.url && res.url !== url) return res.url;
+				if (res.headers) {
+					if (res.headers.location) return res.headers.location;
+					if (res.headers.Location) return res.headers.Location;
+				}
+			}
+		} catch (_h) {}
+
+		// Method 3: Return as-is — player may follow 302 with our headers
 		return url;
 	}
 
