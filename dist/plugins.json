@@ -27,8 +27,7 @@
       "https://top-streaming.stream/ae4e5af7-3e2d-4bdb-a80f-116b12bab549/manifest.json"
     ],
     "metaAddons": [
-      "https://v3-cinemeta.strem.io/manifest.json",
-      "https://tmdb.elfhosted.com/manifest.json"
+      "https://v3-cinemeta.strem.io/manifest.json"
     ],
     "streamingAddons": [
       "https://5a0d1888fa64-orion.baby-beamup.club/eyJhcGkiOiJWTEVMSDVCTkpSS1U4REJUSkdRODZVTjVNTkVMRkNGUyIsImxpbmtMaW1pdCI6IjEwIiwic29ydFZhbHVlIjoic3RyZWFtc2VlZHMiLCJhdWRpb2NoYW5uZWxzIjoiMiw2LDgiLCJ2aWRlb3F1YWxpdHkiOiJoZDRrLGhkMmssaGQxMDgwLGhkNzIwLHNkIiwibGlzdE9wdCI6InRvcnJlbnQiLCJkZWJyaWRzZXJ2aWNlcyI6W10sImF1ZGlvbGFuZ3VhZ2VzIjpbXSwiYWRkaXRpb25hbFBhcmFtZXRlcnMiOiIifQ/manifest.json",
