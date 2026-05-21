@@ -1,10 +1,10 @@
 {
 	"packageName": "dev.sunriseve.onlytorrents",
 	"name": "OnlyTorrents🧲",
-	"version": 2,
+	"version": 3,
 	"baseUrl": "https://stremio-hub.local",
-	"description": "v7.3 — Production-ready hub with smart ID routing (tt→Cinemeta, tmdb:→TMDB addon, 1-2 requests per lookup). Cast photos, streaming-safe episode URLs, Indian regional catalogs.",
-	"authors": ["Cookie🍪"],
+	"description": "v8 — Cinemeta-only (TMDB removed). Fastest metadata: tt→direct Cinemeta, tmdb:→pipe extraction. Cast photos, streaming-safe URLs, Indian regional catalogs.",
+	"authors": ["Cookie\ud83c\udf6a"],
 	"languages": ["en", "hi", "te", "ta", "ml", "kn", "bn"],
 	"categories": ["Movies", "TV", "Anime", "Indian"],
 
@@ -12,9 +12,7 @@
 		"https://top-streaming.stream/ae4e5af7-3e2d-4bdb-a80f-116b12bab549/manifest.json"
 	],
 
-	"metaAddons": [
-		"https://v3-cinemeta.strem.io/manifest.json"
-	],
+	"metaAddons": ["https://v3-cinemeta.strem.io/manifest.json"],
 
 	"streamingAddons": [
 		"https://5a0d1888fa64-orion.baby-beamup.club/eyJhcGkiOiJWTEVMSDVCTkpSS1U4REJUSkdRODZVTjVNTkVMRkNGUyIsImxpbmtMaW1pdCI6IjEwIiwic29ydFZhbHVlIjoic3RyZWFtc2VlZHMiLCJhdWRpb2NoYW5uZWxzIjoiMiw2LDgiLCJ2aWRlb3F1YWxpdHkiOiJoZDRrLGhkMmssaGQxMDgwLGhkNzIwLHNkIiwibGlzdE9wdCI6InRvcnJlbnQiLCJkZWJyaWRzZXJ2aWNlcyI6W10sImF1ZGlvbGFuZ3VhZ2VzIjpbXSwiYWRkaXRpb25hbFBhcmFtZXRlcnMiOiIifQ/manifest.json",
