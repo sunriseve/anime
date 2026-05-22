@@ -2,9 +2,9 @@
   {
     "packageName": "dev.cookie.stremio",
     "name": "Stremio http-streams",
-    "version": 3,
+    "version": 1,
     "baseUrl": "https://stremio-hub.local",
-    "description": "Stream content from Stremio HTTP addons. Strips away all other sources and delivers clean, direct streams. Supports Movies, TV, Anime & Indian content with multi-quality HLS streaming.",
+    "description": "Stream content from Stremio HTTP addons. It strips away all other sources and delivers clean, direct streams.",
     "authors": [
       "Cookie🍪"
     ],
@@ -36,14 +36,8 @@
       "https://nebula.work.gd/configured/all/default/prefer-h264%2Cprefer-smaller-files%2Cprefer-direct-hosts%2Cdedupe%3Dsmart%2Cmax-size-gb%3D10/manifest.json",
       "https://6172e63fd702-del-kdrama-series-movies.baby-beamup.club/manifest.json",
       "https://nagare.nexioapp.org/%7B%22NexioNagare%22%3A%22eyJ1c2VFbmdsaXNoVGl0bGVzIjp0cnVlLCJwcmVmZXJEdWIiOnRydWUsInByb3ZpZGVycyI6WyJvbmV0d290aHJlZWFuaW1lIiwiYW5pem9uZSIsImFuaW1lbm9zdWIiLCJhbmltZXBhaGUiLCJnb2pvIl0sInJlc29sdXRpb25zIjpbIjEwODBwIiwiNzIwcCIsIjQ4MHAiXSwic2hvd1NlYXNvbmFsU2VyaWVzIjpmYWxzZSwic2hvd0FpcmluZ1NlcmllcyI6ZmFsc2UsInNob3dUcmVuZGluZ1NlcmllcyI6ZmFsc2UsInNob3dUb3BTZXJpZXMiOmZhbHNlLCJzaG93VHJlbmRpbmdNb3ZpZXMiOmZhbHNlLCJzaG93VG9wTW92aWVzIjpmYWxzZX0%22%7D/manifest.json",
-      "https://5a0d1888fa64-orion.baby-beamup.club/eyJhcGkiOiJWTEVMSDVCTkpSS1U4REJUSkdRODZVTjVNTkVMRkNGUyIsImxpbmtMaW1pdCI6IjEwIiwic29ydFZhbHVlIjoic3RyZWFtc2VlZHMiLCJhdWRpb2NoYW5uZWxzIjoiMiw2LDgiLCJ2aWRlb3F1YWxpdHkiOiJoZDRrLGhkMmssaGQxMDgwLGhkNzIwLHNkIiwibGlzdE9wdCI6InRvcnJlbnQiLCJkZWJyaWRzZXJ2aWNlcyI6W10sImF1ZGlvbGFuZ3VhZ2VzIjpbXSwiYWRkaXRpb25hbFBhcmFtZXRlcnMiOiIifQ/manifest.json",
-      "https://torrentsdb.com/eyJwcm92aWRlcnMiOlsieXRzIiwiZXp0diIsIjEzMzd4IiwidG9ycmVudGNzdiIsIjFsb3UiLCJueWFhIiwic2t0b3JyZW50IiwiMXRhbWlsYmxhc3RlcnMiLCIxdGFtaWxtdiIsInJhcmdiIiwia25hYmVuIiwidGhlcGlyYXRlYmF5Iiwia2lja2Fzc3RvcnJlbnRzIiwiYW5pbWV0b3NobyIsImV4dHJlbWx5bXRvcnJlbnRzIiwieWdndG9ycmVudCIsInRva3lvdG9zaG8iXSwic29ydCI6InNlZWRlcnMiLCJxdWFsaXR5ZmlsdGVyIjpbIjEwODBwIiwiNzIwcCIsIjQ4MHAiLCI0ayJdLCJsaW1pdCI6IjEwIiwic2l6ZWZpbHRlciI6IjE1MzY1In0=/manifest.json",
-      "https://filmora-production.up.railway.app/manifest.json",
-      "https://watcho3.rafaelzioneverest.workers.dev/manifest.json",
-      "https://astral-mu-two.vercel.app/manifest.json",
-      "https://thebeginningjuststarted.xyz/5f5b2c7060f6cf0a/manifest.json",
-      "https://cinnn.vercel.app/manifest.json",
-      "https://torrentclaw.com/api/stremio/eyJsYW5nIjoiZW4iLCJzb3J0Ijoic2VlZGVycyJ9/manifest.json"
+      "https://sword-watch.vercel.app/manifest.json",
+      "https://dev-streamz-navy.vercel.app/manifest.json"
     ],
     "url": "https://raw.githubusercontent.com/sunriseve/anime/repo/dist/dev.cookie.stremio.sky"
   },
