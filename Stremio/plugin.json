@@ -1,33 +1,36 @@
 {
-	"packageName": "dev.cookie.stremio",
-	"name": "Stremio http-streams",
-	"version": 3,
-	"baseUrl": "https://stremio-hub.local",
-	"description": "Stream content from Stremio HTTP addons. Strips away all other sources and delivers clean, direct streams. Supports Movies, TV, Anime & Indian content with multi-quality HLS streaming.",
-	"authors": ["Cookie🍪"],
-	"languages": ["en", "hi", "te", "ta", "ml", "kn", "bn"],
-	"categories": ["Movies", "TV", "Anime", "Indian"],
+ "packageName": "dev.cookie.stremio",
+ "name": "Stremio http-streams",
+ "version": 1,
+ "baseUrl": "https://stremio-hub.local",
+ "description": "Stream content from Stremio HTTP addons. It strips away all other sources and delivers clean, direct streams.",
+ "authors": ["Cookie\ud83c\udf6a"],
+ "languages": ["en", "hi", "te", "ta", "ml", "kn", "bn"],
+ "categories": ["Movies", "TV", "Anime", "Indian"],
 
-	"catalogueAddons": [
-		"https://aio.pantelx.com/%7B%22userId%22%3A%22d252298e-2ca1-4d8f-b1c5-c1e66be22d98%22%7D/manifest.json"
-	],
+ "catalogueAddons": [
+  "https://aio.pantelx.com/%7B%22userId%22%3A%22d252298e-2ca1-4d8f-b1c5-c1e66be22d98%22%7D/manifest.json"
+ ],
 
-	"metaAddons": ["https://v3-cinemeta.strem.io/manifest.json"],
+ "metaAddons": ["https://v3-cinemeta.strem.io/manifest.json"],
 
-	"streamingAddons": [
-		"https://87d6a6ef6b58-webstreamrmbg.baby-beamup.club/%7B%22multi%22%3A%22on%22%2C%22excludeResolution_Unknown%22%3A%22on%22%2C%22excludeResolution_144p%22%3A%22on%22%2C%22excludeResolution_240p%22%3A%22on%22%2C%22disableExtractor_youtube%22%3A%22on%22%7D/manifest.json",
-		"https://hdhub.thevolecitor.qzz.io/eyJ0b3Jib3giOiJ1bnNldCIsInF1YWxpdGllcyI6IjIxNjBwLDEwODBwLDcyMHAsNDgwcCIsInNvcnQiOiJhc2MiLCJtcSI6NSwibXAiOjEwfQ/manifest.json",
-		"https://badboysxs-morpheus.hf.space/bWIsbm0sZGYsaGgsa2gsa20sYXcsaG0/manifest.json",
-		"https://nebula.work.gd/configured/all/default/prefer-h264%2Cprefer-smaller-files%2Cprefer-direct-hosts%2Cdedupe%3Dsmart%2Cmax-size-gb%3D10/manifest.json",
-		"https://6172e63fd702-del-kdrama-series-movies.baby-beamup.club/manifest.json",
-		"https://nagare.nexioapp.org/%7B%22NexioNagare%22%3A%22eyJ1c2VFbmdsaXNoVGl0bGVzIjp0cnVlLCJwcmVmZXJEdWIiOnRydWUsInByb3ZpZGVycyI6WyJvbmV0d290aHJlZWFuaW1lIiwiYW5pem9uZSIsImFuaW1lbm9zdWIiLCJhbmltZXBhaGUiLCJnb2pvIl0sInJlc29sdXRpb25zIjpbIjEwODBwIiwiNzIwcCIsIjQ4MHAiXSwic2hvd1NlYXNvbmFsU2VyaWVzIjpmYWxzZSwic2hvd0FpcmluZ1NlcmllcyI6ZmFsc2UsInNob3dUcmVuZGluZ1NlcmllcyI6ZmFsc2UsInNob3dUb3BTZXJpZXMiOmZhbHNlLCJzaG93VHJlbmRpbmdNb3ZpZXMiOmZhbHNlLCJzaG93VG9wTW92aWVzIjpmYWxzZX0%22%7D/manifest.json",
-		"https://5a0d1888fa64-orion.baby-beamup.club/eyJhcGkiOiJWTEVMSDVCTkpSS1U4REJUSkdRODZVTjVNTkVMRkNGUyIsImxpbmtMaW1pdCI6IjEwIiwic29ydFZhbHVlIjoic3RyZWFtc2VlZHMiLCJhdWRpb2NoYW5uZWxzIjoiMiw2LDgiLCJ2aWRlb3F1YWxpdHkiOiJoZDRrLGhkMmssaGQxMDgwLGhkNzIwLHNkIiwibGlzdE9wdCI6InRvcnJlbnQiLCJkZWJyaWRzZXJ2aWNlcyI6W10sImF1ZGlvbGFuZ3VhZ2VzIjpbXSwiYWRkaXRpb25hbFBhcmFtZXRlcnMiOiIifQ/manifest.json",
-		"https://torrentsdb.com/eyJwcm92aWRlcnMiOlsieXRzIiwiZXp0diIsIjEzMzd4IiwidG9ycmVudGNzdiIsIjFsb3UiLCJueWFhIiwic2t0b3JyZW50IiwiMXRhbWlsYmxhc3RlcnMiLCIxdGFtaWxtdiIsInJhcmdiIiwia25hYmVuIiwidGhlcGlyYXRlYmF5Iiwia2lja2Fzc3RvcnJlbnRzIiwiYW5pbWV0b3NobyIsImV4dHJlbWx5bXRvcnJlbnRzIiwieWdndG9ycmVudCIsInRva3lvdG9zaG8iXSwic29ydCI6InNlZWRlcnMiLCJxdWFsaXR5ZmlsdGVyIjpbIjEwODBwIiwiNzIwcCIsIjQ4MHAiLCI0ayJdLCJsaW1pdCI6IjEwIiwic2l6ZWZpbHRlciI6IjE1MzY1In0=/manifest.json",
-		"https://filmora-production.up.railway.app/manifest.json",
-		"https://watcho3.rafaelzioneverest.workers.dev/manifest.json",
-		"https://astral-mu-two.vercel.app/manifest.json",
-		"https://thebeginningjuststarted.xyz/5f5b2c7060f6cf0a/manifest.json",
-		"https://cinnn.vercel.app/manifest.json",
-		"https://torrentclaw.com/api/stremio/eyJsYW5nIjoiZW4iLCJzb3J0Ijoic2VlZGVycyJ9/manifest.json"
-	]
+  
+  "streamingAddons": [
+
+    "https://87d6a6ef6b58-webstreamrmbg.baby-beamup.club/%7B%22multi%22%3A%22on%22%2C%22excludeResolution_Unknown%22%3A%22on%22%2C%22excludeResolution_144p%22%3A%22on%22%2C%22excludeResolution_240p%22%3A%22on%22%2C%22disableExtractor_youtube%22%3A%22on%22%7D/manifest.json",
+    "https://hdhub.thevolecitor.qzz.io/eyJ0b3Jib3giOiJ1bnNldCIsInF1YWxpdGllcyI6IjIxNjBwLDEwODBwLDcyMHAsNDgwcCIsInNvcnQiOiJhc2MiLCJtcSI6NSwibXAiOjEwfQ/manifest.json",
+    "https://badboysxs-morpheus.hf.space/bWIsbm0sZGYsaGgsa2gsa20sYXcsaG0/manifest.json",
+    "https://nebula.work.gd/configured/all/default/prefer-h264%2Cprefer-smaller-files%2Cprefer-direct-hosts%2Cdedupe%3Dsmart%2Cmax-size-gb%3D10/manifest.json",
+    "https://6172e63fd702-del-kdrama-series-movies.baby-beamup.club/manifest.json",
+
+
+    "https://nagare.nexioapp.org/%7B%22NexioNagare%22%3A%22eyJ1c2VFbmdsaXNoVGl0bGVzIjp0cnVlLCJwcmVmZXJEdWIiOnRydWUsInByb3ZpZGVycyI6WyJvbmV0d290aHJlZWFuaW1lIiwiYW5pem9uZSIsImFuaW1lbm9zdWIiLCJhbmltZXBhaGUiLCJnb2pvIl0sInJlc29sdXRpb25zIjpbIjEwODBwIiwiNzIwcCIsIjQ4MHAiXSwic2hvd1NlYXNvbmFsU2VyaWVzIjpmYWxzZSwic2hvd0FpcmluZ1NlcmllcyI6ZmFsc2UsInNob3dUcmVuZGluZ1NlcmllcyI6ZmFsc2UsInNob3dUb3BTZXJpZXMiOmZhbHNlLCJzaG93VHJlbmRpbmdNb3ZpZXMiOmZhbHNlLCJzaG93VG9wTW92aWVzIjpmYWxzZX0%22%7D/manifest.json",
+
+
+
+    "https://sword-watch.vercel.app/manifest.json",
+    "https://dev-streamz-navy.vercel.app/manifest.json"
+
+
+  ]
 }
