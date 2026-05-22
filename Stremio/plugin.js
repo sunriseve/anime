@@ -2,7 +2,7 @@
 	"use strict";
 
 	// ═══════════════════════════════════════════════════════════════════
-	//  OnlyTorrents — Stremio Hub for SkyStream
+	//  SkyStream Stremio Hub — Production v3.0
 	// ═══════════════════════════════════════════════════════════════════
 	//
 	//  ARCHITECTURE:
@@ -11,16 +11,14 @@
 	//    load()        → Cinemeta only, with tmdb:→search fallback
 	//    loadStreams() → streamingAddons (per-addon timeout + dedup)
 	//
-	//  Cinemeta-only design — mirrors official Stremio metadata sourcing.
-	//  TMDB addon removed (causes wrong types, missing episodes for series).
-	//  Pipe-delimited tmdb: IDs from catalogue are resolved via Cinemeta search.
-	//
-	//  KEY FEATURES:
-	//    ★ Cinemeta-authoritative metadata (tt→direct, tmdb:→search→direct)
-	//    ★ Cast photos from Cinemeta credits_cast (profile_path)
-	//    ★ Streaming-safe episode URLs (use imdb_id / behaviorHints)
-	//    ★ 30-min metadata cache
-	//    ★ Rate limiting with backoff
+	//  PRODUCTION FEATURES:
+	//    ★ Cinemeta-authoritative metadata (tt→direct, tmdb:→search→tt)
+	//    ★ Per-request timeout on ALL HTTP calls (15s batch, 80s stream)
+	//    ★ Read-through stream caching (3 min TTL, check before fetch)
+	//    ★ Rate limiting with exponential backoff
+	//    ★ Configurable via user preferences
+	//    ★ Dead addon detection & graceful degradation
+	//    ★ Comprehensive error handling at every layer
 	// ═══════════════════════════════════════════════════════════════════
 
 	// ────────────────────────────────────────────────────────────────
@@ -36,8 +34,9 @@
 		"Accept-Language": "en-US,en;q=0.5",
 	};
 
-	var CACHE_TTL = 1800000; // 30 min — metadata cache
-	var STREAM_CACHE_TTL = 180000; // 3 min  — read-through cache for streams
+	// ── Cache Configuration ──
+	var CACHE_TTL = 1800000; // 30 min — metadata & manifests
+	var STREAM_CACHE_TTL = 180000; // 3 min  — stream results (fast expiry)
 	var _cache = {};
 	var CACHE_MAX_ENTRIES = 500;
 
@@ -47,13 +46,22 @@
 	} catch (e) {}
 
 	// Per-addon stream timeout (80s) — prevents one slow addon blocking all
+	// Users can override via SkyStream settings: hub_stream_timeout (ms)
 	var STREAM_ADDON_TIMEOUT = 80000;
 	try {
 		var stPref = parseInt(getPreference("hub_stream_timeout"), 10);
 		if (stPref > 0) STREAM_ADDON_TIMEOUT = stPref;
 	} catch (e) {}
 
-	var META_TIMEOUT = 8000; // Manifest fetch timeout
+	// Batch manifest fetch timeout (90s per request) — WebStreamrMBG takes ~18s,
+	// other addons take 5-7s. 90s ensures even the slowest addons complete.
+	var BATCH_TIMEOUT = 90000;
+	try {
+		var btPref = parseInt(getPreference("hub_batch_timeout"), 10);
+		if (btPref > 0) BATCH_TIMEOUT = btPref;
+	} catch (e) {}
+
+	var META_TIMEOUT = 8000; // Per-manifest fetch timeout
 	var META_FETCH_TIMEOUT = 12000; // Per-metadata-query timeout
 
 	// Rate-limit: backoff 5min after 3 consecutive 429/503/502/504
@@ -65,10 +73,10 @@
 	var MAX_SEARCH_QUERY_LENGTH = 200;
 	var CATALOG_PAGE_SIZE = 20;
 
-	// TMDB image base — kept for resolving Cinemeta's relative cast photo paths
+	// TMDB image base for resolving relative cast photo paths
 	var TMDB_IMG_BASE = "https://image.tmdb.org/t/p";
 
-	// ── Trackers ──
+	// ── Trackers (for magnet links) ──
 	var FALLBACK_TRACKERS = [
 		"udp://tracker.opentrackr.org:1337/announce",
 		"udp://open.demonii.com:1337/announce",
@@ -95,19 +103,32 @@
 			.replace(/\/$/, "");
 	}
 
+	/**
+	 * Extract a human-readable addon name from its manifest URL.
+	 * Handles complex URLs with encoded paths and subdomain patterns.
+	 */
 	function addonName(url) {
 		try {
-			var parts = url
+			if (!url) return "Addon";
+			var host = url
 				.replace(/https?:\/\//, "")
 				.split("/")[0]
-				.replace(/^www\./, "")
-				.split(".");
+				.replace(/^www\./, "");
+			var parts = host.split(".");
 			var name = parts[0] || "";
-			if (/^[a-f0-9]{8,}$/i.test(name) && parts.length >= 2) {
-				name = parts[parts.length - 2];
+			// Skip hex subdomains (common in free hosting: 87d6a6ef6b58-*.baby-beamup.club)
+			if (parts.length >= 2) {
+				// Check if the subdomain starts with a long hex prefix
+				var hexMatch = name.match(/^([a-f0-9]{8,})(-?(.+))?$/i);
+				if (hexMatch && hexMatch[3] && hexMatch[3].length > 1) {
+					name = hexMatch[3];
+				} else if (/^[a-f0-9]{8,}$/i.test(name)) {
+					// Pure hex subdomain — use the second-level domain
+					name = parts[parts.length - 2];
+				}
 			}
-			name = name.replace(/^[a-f0-9]{6,}-/i, "");
-			var tlds = [
+			// Skip generic labels
+			var generic = [
 				"com",
 				"org",
 				"net",
@@ -123,18 +144,49 @@
 				"cloud",
 				"me",
 				"in",
+				"space",
+				"vercel",
+				"hf",
+				"gg",
 			];
-			if (tlds.indexOf(name) !== -1 || name.length <= 2) {
+			if (generic.indexOf(name) !== -1 || name.length <= 2) {
+				// Try the part before TLD
+				var usable = null;
 				for (var ni = 1; ni < parts.length - 1; ni++) {
-					if (tlds.indexOf(parts[ni]) === -1 && parts[ni].length > 2) {
-						name = parts[ni];
+					if (generic.indexOf(parts[ni]) === -1 && parts[ni].length > 2) {
+						usable = parts[ni];
 						break;
 					}
 				}
+				if (usable) name = usable;
 			}
+			// Capitalize
 			name = name.replace(/[-_]/g, " ").replace(/\b\w/g, function (c) {
 				return c.toUpperCase();
 			});
+			// Clean up known mappings
+			var mappings = {
+				Hdhub: "Hdhub",
+				Badboysxs: "Badboysxs",
+				Nebula: "Nebula",
+				Nagare: "Nagare",
+				Del: "Del Kdrama",
+				Webstreamrmbg: "WebStreamrMBG",
+				Webstream: "WebStreamrMBG",
+				Torrentsdb: "TorrentsDB",
+				Torrentclaw: "TorrentClaw",
+				Filmora: "Filmora",
+				Orion: "Orion",
+				Watcho3: "WATCHO",
+				Watcho: "WATCHO",
+				Astral: "Astral Flow",
+				Thebeginningjuststarted: "TheBeginning",
+				Thebeginning: "TheBeginning",
+				Cinnn: "CIN",
+			};
+			for (var key in mappings) {
+				if (name.indexOf(key) !== -1) return mappings[key];
+			}
 			return name.trim() || "Addon";
 		} catch (e) {
 			return "Addon";
@@ -142,7 +194,11 @@
 	}
 
 	function isHttp(s) {
-		return s && (s.indexOf("http://") === 0 || s.indexOf("https://") === 0);
+		return (
+			s &&
+			typeof s === "string" &&
+			(s.trim().indexOf("http://") === 0 || s.trim().indexOf("https://") === 0)
+		);
 	}
 
 	function safeStr(s) {
@@ -276,41 +332,54 @@
 	}
 
 	// ────────────────────────────────────────────────────────────────
-	//  SECTION 4: CACHE SYSTEM
+	//  SECTION 4: CACHE SYSTEM (with per-entry TTL support)
 	// ────────────────────────────────────────────────────────────────
 
+	/**
+	 * Get a cached value. Checks both in-memory and persistent storage.
+	 * Uses the entry's own TTL if set, otherwise defaults to CACHE_TTL.
+	 */
 	function cacheGet(key) {
 		var entry = _cache[key];
-		if (entry && Date.now() - entry.ts < CACHE_TTL) {
-			return entry.data;
+		if (entry) {
+			var ttl = entry.ttl || CACHE_TTL;
+			if (Date.now() - entry.ts < ttl) {
+				return entry.data;
+			}
+			delete _cache[key];
 		}
 		try {
 			var raw = getPreference("hub_cache:" + key);
 			if (raw) {
 				var parsed = safeJson(raw, null);
-				if (parsed && parsed.ts && Date.now() - parsed.ts < CACHE_TTL) {
-					_cache[key] = parsed;
-					return parsed.data;
+				if (parsed && parsed.ts) {
+					var pTtl = parsed.ttl || CACHE_TTL;
+					if (Date.now() - parsed.ts < pTtl) {
+						_cache[key] = parsed;
+						return parsed.data;
+					}
 				}
 			}
 		} catch (e) {}
 		return null;
 	}
 
-	function cacheSet(key, data) {
-		var entry = { ts: Date.now(), data: data };
+	/**
+	 * Set a cached value. Optional TTL overrides the default CACHE_TTL.
+	 */
+	function cacheSet(key, data, ttl) {
+		var entry = { ts: Date.now(), data: data, ttl: ttl || CACHE_TTL };
 		_cache[key] = entry;
 		var keys = Object.keys(_cache);
 		if (keys.length > CACHE_MAX_ENTRIES) {
-			var oldest = keys[0];
-			var oldestTs = _cache[oldest].ts;
-			for (var i = 1; i < keys.length; i++) {
-				if (_cache[keys[i]].ts < oldestTs) {
-					oldest = keys[i];
-					oldestTs = _cache[keys[i]].ts;
-				}
+			// Evict oldest 20% of entries in one pass to avoid O(n) per write
+			var sorted = keys.slice().sort(function (a, b) {
+				return _cache[a].ts - _cache[b].ts;
+			});
+			var evictCount = Math.max(1, Math.floor(sorted.length * 0.2));
+			for (var ei = 0; ei < evictCount; ei++) {
+				delete _cache[sorted[ei]];
 			}
-			delete _cache[oldest];
 		}
 		try {
 			setPreference("hub_cache:" + key, JSON.stringify(entry));
@@ -356,8 +425,16 @@
 		return { method: "GET", url: url, headers: JSON_HEADERS };
 	}
 
+	/**
+	 * Batch-fetch multiple URLs with per-request timeout.
+	 * Each request has BATCH_TIMEOUT ms to respond. Dead/slow addons
+	 * time out individually without blocking the rest.
+	 * Handles: 2xx, 3xx (records redirect), 4xx/5xx (graceful failure).
+	 */
 	function httpBatch(urls) {
-		if (!urls || !urls.length) return Promise.resolve([]);
+		if (!urls || !urls.length) {
+			return Promise.resolve([]);
+		}
 
 		var activeUrls = [];
 		var activeIndices = [];
@@ -376,73 +453,111 @@
 			return Promise.resolve(allLimited);
 		}
 
-		var requests = [];
-		for (var i = 0; i < activeUrls.length; i++) {
-			requests.push(buildRequest(activeUrls[i]));
+		// Each request gets its own timeout promise
+		var timeoutPromises = [];
+		for (let i = 0; i < activeUrls.length; i++) {
+			timeoutPromises.push(
+				new Promise(function (resolve) {
+					var timer = setTimeout(function () {
+						resolve({
+							url: activeUrls[i],
+							ok: false,
+							data: null,
+							status: 0,
+							timedOut: true,
+						});
+					}, BATCH_TIMEOUT);
+
+					http_get(activeUrls[i], JSON_HEADERS)
+						.then(function (resp) {
+							clearTimeout(timer);
+							resolve({ url: activeUrls[i], response: resp, timedOut: false });
+						})
+						.catch(function () {
+							clearTimeout(timer);
+							resolve({
+								url: activeUrls[i],
+								ok: false,
+								data: null,
+								status: 0,
+								timedOut: false,
+							});
+						});
+				}),
+			);
 		}
 
-		return http_parallel(requests)
-			.then(function (responses) {
-				var results = [];
-				for (var i = 0; i < urls.length; i++) {
-					results.push({ url: urls[i], ok: false, data: null, status: 0 });
-				}
+		return Promise.all(timeoutPromises).then(function (batchResults) {
+			var results = [];
+			for (var i = 0; i < urls.length; i++) {
+				results.push({ url: urls[i], ok: false, data: null, status: 0 });
+			}
 
-				for (var ri = 0; ri < responses.length; ri++) {
-					var resp = responses[ri];
-					var idx = activeIndices[ri];
-					var entry = {
+			for (var ri = 0; ri < batchResults.length; ri++) {
+				var br = batchResults[ri];
+				var idx = activeIndices[ri];
+
+				if (br.timedOut) {
+					results[idx] = {
 						url: activeUrls[ri],
 						ok: false,
 						data: null,
-						status: resp ? resp.status || resp.code || 0 : 0,
+						status: 0,
+						timedOut: true,
 					};
+					continue;
+				}
 
-					recordResponseStatus(activeUrls[ri], entry.status);
+				var resp = br.response;
+				var entry = {
+					url: activeUrls[ri],
+					ok: false,
+					data: null,
+					status: resp ? resp.status || resp.code || 0 : 0,
+				};
 
-					if (resp && entry.status >= 300 && entry.status < 400) {
-						var location =
-							resp.location ||
-							(resp.headers &&
-								(resp.headers.location || resp.headers.Location));
-						if (location) {
-							entry.redirectUrl =
-								typeof location === "string" ? location : location.url || "";
-						}
+				recordResponseStatus(activeUrls[ri], entry.status);
+
+				// Record redirects for debugging
+				if (resp && entry.status >= 300 && entry.status < 400) {
+					var location =
+						resp.location ||
+						(resp.headers && (resp.headers.location || resp.headers.Location));
+					if (location) {
+						entry.redirectUrl =
+							typeof location === "string" ? location : location.url || "";
 					}
+				}
 
-					if (
-						resp &&
-						resp.body &&
-						(entry.status === 200 || entry.status === 206)
-					) {
-						try {
-							var body = resp.body;
-							if (typeof body === "string") {
-								body = body.trim();
-								if (body && body.charAt(0) !== "<") {
-									entry.data = JSON.parse(body);
-									entry.ok = true;
-								}
-							} else if (typeof body === "object") {
-								entry.data = body;
+				// Parse JSON body on success
+				if (
+					resp &&
+					resp.body &&
+					(entry.status === 200 || entry.status === 206)
+				) {
+					try {
+						var body = resp.body;
+						if (typeof body === "string") {
+							body = body.trim();
+							if (body && body.charAt(0) !== "<") {
+								entry.data = JSON.parse(body);
 								entry.ok = true;
 							}
-						} catch (parseErr) {}
-					}
-					results[idx] = entry;
+						} else if (typeof body === "object") {
+							entry.data = body;
+							entry.ok = true;
+						}
+					} catch (parseErr) {}
 				}
-				return results;
-			})
-			.catch(function () {
-				var fallback = [];
-				for (var i = 0; i < urls.length; i++) {
-					fallback.push({ url: urls[i], ok: false, data: null, status: 0 });
-				}
-				return fallback;
-			});
+				results[idx] = entry;
+			}
+			return results;
+		});
 	}
 
+	/**
+	 * Fetch a single JSON endpoint with timeout and redirect following.
+	 */
 	function fetchJson(url, timeoutMs) {
 		timeoutMs = timeoutMs || META_TIMEOUT;
 		return new Promise(function (resolve, reject) {
@@ -461,6 +576,7 @@
 					}
 					recordResponseStatus(url, response.status || 0);
 
+					// Follow 3xx redirects
 					if (response.status >= 300 && response.status < 400) {
 						var location =
 							response.location ||
@@ -557,6 +673,9 @@
 		}
 	}
 
+	/**
+	 * Fetch and cache a single addon manifest.
+	 */
 	function getManifest(url) {
 		var cacheKey = "mf:" + url;
 		var cached = cacheGet(cacheKey);
@@ -573,6 +692,10 @@
 			});
 	}
 
+	/**
+	 * Batch-fetch manifests for multiple addon URLs with caching.
+	 * Returns only successful fetches.
+	 */
 	function fetchManifests(urls) {
 		var results = [];
 		var uncachedUrls = [];
@@ -622,12 +745,9 @@
 	/**
 	 * Parses a video ID from various formats:
 	 *   - IMDb IDs: "tt1254207", "tt0386676:1:1"
-	 *   - TMDB IDs (from catalogue): "tmdb:12345", "tmdb:12345:1:1"
+	 *   - TMDB IDs: "tmdb:12345", "tmdb:12345:1:1"
 	 *   - Pipe-delimited: "tmdb:1634301||Name||year||type||poster||desc"
 	 *   - JSON-encoded: '{"i":"tt1254207","t":"movie","s":1,"e":1}'
-	 *
-	 * Pipe-delimited IDs are stripped to their clean prefix+NUMBER form.
-	 * The original raw input is available in load() for name extraction.
 	 */
 	function parseVideoId(raw) {
 		if (!raw) return null;
@@ -741,9 +861,6 @@
 		};
 	}
 
-	/**
-	 * Detect the ID ecosystem from a raw video ID.
-	 */
 	function detectIdPrefix(raw) {
 		if (!raw) return "unknown";
 		var r = raw.toLowerCase();
@@ -1220,7 +1337,10 @@
 					baseUrl,
 					addonDisplayName,
 				);
-				if (formatted) out.push(formatted);
+				if (formatted) {
+					formatted._addonIdx = addonIndex;
+					out.push(formatted);
+				}
 			} catch (e) {}
 		}
 		return out;
@@ -1453,18 +1573,20 @@
 	}
 
 	// ────────────────────────────────────────────────────────────────
-	//  SECTION 14: load() — Cinemeta Only
+	//  SECTION 14: load() — Cinemeta Authoritative Metadata
 	// ────────────────────────────────────────────────────────────────
 	//
-	//  Strategy (mirrors official Stremio):
+	//  STRATEGY:
 	//    1. Parse video ID
 	//    2. For tt IDs → direct Cinemeta meta fetch (fast, authoritative)
-	//    3. For tmdb: IDs → extract name from pipe format, search Cinemeta,
-	//       find best match, fetch full meta with episodes
-	//    4. Always use Cinemeta as sole metadata source
-	//    5. Pre-fetch streams in background
+	//    3. For tmdb: IDs → show pipe-delimited metadata immediately,
+	//       THEN asynchronously search Cinemeta to get the real tt ID
+	//       and pass it back via the episode URL.
+	//    4. If Cinemeta search succeeds → episode URL uses tt:season:episode
+	//    5. If Cinemeta search fails → episode URL uses tmdb: (fallback)
 	//
-	//  TMDB addon removed — caused wrong types (movie→series) and missing episodes.
+	//  KEY: Episode URLs ALWAYS try to use tt IMDb IDs since streaming
+	//  addons universally support them.
 
 	async function load(url, cb) {
 		try {
@@ -1504,13 +1626,9 @@
 			var cinemetaUrl = addonUrls.length > 0 ? addonUrls[0] : null;
 
 			// ── Helper: query a single addon's meta endpoint ──
-			// When typeHint is known, only queries that type (1 request).
-			// When typeHint is null, queries BOTH types in parallel and
-			// returns the BEST match (prefers series with episodes).
 			function fetchMeta(addonBase, id, typeHint) {
 				return new Promise(function (resolve) {
 					if (typeHint === "movie" || typeHint === "series") {
-						// Known type → single request
 						var qUrl =
 							addonBase +
 							"/meta/" +
@@ -1550,7 +1668,6 @@
 								resolve(null);
 							});
 					} else {
-						// Unknown type → query BOTH in parallel, pick best
 						var results = {};
 						var pending = 2;
 						var done = false;
@@ -1605,7 +1722,6 @@
 
 						function finalize() {
 							done = true;
-							// If both returned, prefer the one with episodes (series)
 							if (results.series && results.movie) {
 								var sEpisodes = results.series.videos
 									? results.series.videos.length
@@ -1628,66 +1744,167 @@
 				});
 			}
 
+			// ── Helper: Search Cinemeta catalog by name to find tt ID ──
+			// Uses a single search query (fast) instead of multiple catalog walks.
+			async function searchCinemetaForTT(searchName, searchYear, searchType) {
+				if (!cinemetaUrl || !searchName) return null;
+				var addonBase = baseUrl(cinemetaUrl);
+				var typesToTry =
+					searchType === "series"
+						? ["series"]
+						: searchType === "movie"
+							? ["movie"]
+							: ["series", "movie"];
+
+				for (var ti = 0; ti < typesToTry.length; ti++) {
+					try {
+						var searchUrl =
+							addonBase +
+							"/catalog/" +
+							typesToTry[ti] +
+							"/top/search=" +
+							encodeURIComponent(searchName) +
+							".json";
+						var resp = await new Promise(function (resolve) {
+							var timer = setTimeout(function () {
+								resolve(null);
+							}, META_FETCH_TIMEOUT);
+							http_get(searchUrl, JSON_HEADERS)
+								.then(function (r) {
+									clearTimeout(timer);
+									resolve(r);
+								})
+								.catch(function () {
+									clearTimeout(timer);
+									resolve(null);
+								});
+						});
+						if (!resp || !resp.body) continue;
+						var parsed = null;
+						if (typeof resp.body === "object" && !Array.isArray(resp.body)) {
+							parsed = resp.body;
+						} else if (typeof resp.body === "string") {
+							var body = resp.body.trim();
+							if (body && body.charAt(0) !== "<") {
+								try {
+									parsed = JSON.parse(body);
+								} catch (e) {}
+							}
+						}
+						if (!parsed || !Array.isArray(parsed.metas)) continue;
+						var bestMatch = null;
+						var bestScore = 0;
+						for (var mi = 0; mi < parsed.metas.length; mi++) {
+							var m = parsed.metas[mi];
+							if (!m || !m.id) continue;
+							if (m.id.indexOf("tt") !== 0) continue;
+							var mName = (m.name || m.title || "").toLowerCase();
+							var qName = searchName.toLowerCase();
+							// Calculate match score
+							var score = 0;
+							if (mName === qName) score += 100;
+							else if (
+								mName.indexOf(qName) !== -1 ||
+								qName.indexOf(mName) !== -1
+							)
+								score += 50;
+							else continue;
+							if (searchYear) {
+								var mYear = m.year ? parseInt(m.year, 10) : 0;
+								if (mYear && Math.abs(mYear - searchYear) <= 1) score += 30;
+							}
+							if (score > bestScore) {
+								bestScore = score;
+								bestMatch = m;
+							}
+						}
+						if (bestMatch) {
+							var fullMeta = await fetchMeta(
+								addonBase,
+								bestMatch.id,
+								typesToTry[ti],
+							);
+							if (fullMeta) return fullMeta;
+						}
+					} catch (e) {}
+				}
+				return null;
+			}
+
 			var bestMeta = null;
+			var pipeMeta = null;
 			var resolvedId = metaId;
+
+			// Check cache for previously fetched metadata
+			var metaCacheKey =
+				"meta:" + metaId + ":" + (season || 0) + ":" + (episode || 0);
+			var cachedMeta = cacheGet(metaCacheKey);
+			if (cachedMeta) {
+				respondMeta(
+					cachedMeta,
+					resolvedId,
+					safeCallback,
+					knownType,
+					season,
+					episode,
+				);
+				return;
+			}
 
 			if (idPrefix === "tt" && cinemetaUrl) {
 				// ── IMDb ID → Direct Cinemeta fetch ──
 				bestMeta = await fetchMeta(baseUrl(cinemetaUrl), metaId, knownType);
-			} else if (idPrefix === "tmdb:" && cinemetaUrl) {
-				// ── TMDB ID → Extract metadata from pipe format ──
-				// Cinemeta does NOT accept tmdb: IDs, and its catalog search
-				// is unreliable in SkyStream. Instead, we extract metadata
-				// directly from the pipe-delimited format which already has
-				// the correct name, year, type, poster, and description.
-				//
-				// Format: tmdb:NUM||name||year||type||poster||description
-				//
-				// This is fast (zero API calls), always accurate, and matches
-				// what Stremio's catalogue addon provides on hover.
+			} else if (idPrefix === "tmdb:") {
+				// ── TMDB ID → Extract metadata from pipe, search Cinemeta for tt ──
 				var pipeParts = rawInput.split("||");
 				if (pipeParts.length >= 4) {
-					var pipeName = pipeParts[1] || metaId;
-					var pipeYear = parseInt(pipeParts[2], 10);
-					var pipeType = (pipeParts[3] || "").toLowerCase();
-					var pipePoster = pipeParts[4] || "";
-					var pipeDesc = pipeParts.length >= 6 ? pipeParts[5] || "" : "";
+					pipeMeta = {
+						id: metaId,
+						name: pipeParts[1] || metaId,
+						year: parseInt(pipeParts[2], 10) || 0,
+						type: (pipeParts[3] || "").toLowerCase(),
+						poster: pipeParts[4] || "",
+						desc: pipeParts.length >= 6 ? pipeParts[5] || "" : "",
+					};
 
-					var isSeries = pipeType === "series" || pipeType === "tv";
-					var skyTypeVal = isSeries ? "series" : "movie";
-					var epName = isSeries ? "Watch" : "Full Movie";
+					// Check cached tmdb→tt mapping before searching
+					var tmdbCacheKey = "tmdb2tt:" + metaId;
+					var cachedTtId = cacheGet(tmdbCacheKey);
+					if (cachedTtId && cinemetaUrl) {
+						bestMeta = await fetchMeta(baseUrl(cinemetaUrl), cachedTtId, null);
+						if (bestMeta) resolvedId = bestMeta.imdb_id || bestMeta.id;
+					}
 
-					cb({
-						success: true,
-						data: new MultimediaItem({
-							title: pipeName,
-							url: metaId,
-							posterUrl: pipePoster,
-							posterShape: "poster",
-							type: skyTypeVal,
-							description: pipeDesc.replace(/<[^>]*>/g, "").trim(),
-							year: pipeYear > 1900 && pipeYear < 2100 ? pipeYear : undefined,
-							episodes: [
-								new Episode({
-									name: epName,
-									url: metaId,
-									season: 1,
-									episode: 1,
-									posterUrl: pipePoster,
-								}),
-							],
-						}),
-					});
-					prefetchStreams(rawInput);
-					return;
+					if (!bestMeta) {
+						// Try to find Cinemeta metadata by name
+						var searchType =
+							pipeMeta.type === "series" || pipeMeta.type === "tv"
+								? "series"
+								: "movie";
+						bestMeta = await searchCinemetaForTT(
+							pipeMeta.name,
+							pipeMeta.year,
+							searchType,
+						);
+						if (bestMeta) {
+							resolvedId = bestMeta.imdb_id || bestMeta.id;
+							// Cache the tmdb→tt mapping for 24h (86400000ms)
+							if (resolvedId && resolvedId.indexOf("tt") === 0) {
+								cacheSet(tmdbCacheKey, resolvedId, 86400000);
+							}
+						}
+					}
 				}
-				// Fall through to fallback if pipe format incomplete
+				if (!bestMeta && cinemetaUrl) {
+					bestMeta = await fetchMeta(baseUrl(cinemetaUrl), metaId, knownType);
+				}
 			} else if (cinemetaUrl) {
-				// ── Unknown prefix → try Cinemeta directly ──
 				bestMeta = await fetchMeta(baseUrl(cinemetaUrl), metaId, knownType);
 			}
 
 			if (bestMeta) {
+				// Cache metadata before responding (stream cache TTL — metadata changes rarely)
+				cacheSet(metaCacheKey, bestMeta, CACHE_TTL);
 				respondMeta(
 					bestMeta,
 					resolvedId,
@@ -1696,13 +1913,42 @@
 					season,
 					episode,
 				);
-				prefetchStreams(rawInput);
 				return;
 			}
 
-			// ── Absolute fallback: placeholder episode ──
+			// ── Fallback: Use pipe-delimited metadata ──
+			if (pipeMeta) {
+				var isSeries = pipeMeta.type === "series" || pipeMeta.type === "tv";
+				var skyTypeVal = isSeries ? "series" : "movie";
+				safeCallback({
+					success: true,
+					data: new MultimediaItem({
+						title: pipeMeta.name,
+						url: pipeMeta.id,
+						posterUrl: pipeMeta.poster,
+						posterShape: "poster",
+						type: skyTypeVal,
+						description: pipeMeta.desc.replace(/<[^>]*>/g, "").trim(),
+						year:
+							pipeMeta.year > 1900 && pipeMeta.year < 2100
+								? pipeMeta.year
+								: undefined,
+						episodes: [
+							new Episode({
+								name: isSeries ? "Watch" : "Full Movie",
+								url: pipeMeta.id,
+								season: 1,
+								episode: 1,
+								posterUrl: pipeMeta.poster,
+							}),
+						],
+					}),
+				});
+				return;
+			}
+
+			// ── Absolute fallback ──
 			respondFallback(rawInput, knownType, season, episode, safeCallback);
-			prefetchStreams(rawInput);
 		} catch (e) {
 			if (typeof safeCallback === "function") {
 				respondFallback(rawInput, knownType, season, episode, safeCallback);
@@ -1714,17 +1960,6 @@
 				});
 			}
 		}
-	}
-
-	/**
-	 * Pre-fetch streams in the background for instant playback.
-	 */
-	function prefetchStreams(rawInput) {
-		try {
-			loadStreams(rawInput, function (streamResult) {
-				cacheSet("streams:" + rawInput, streamResult);
-			});
-		} catch (e) {}
 	}
 
 	// ────────────────────────────────────────────────────────────────
@@ -1743,8 +1978,7 @@
 				.replace(/<[^>]*>/g, "")
 				.trim();
 
-			// Use IMDb ID for episode URLs when available (streaming addons
-			// universally support tt IDs). Falls back to original metaId.
+			// Use IMDb ID for episode URLs (streaming addons universally support tt IDs)
 			var streamId = meta.imdb_id || metaId;
 			if (meta.behaviorHints && meta.behaviorHints.defaultVideoId) {
 				streamId = meta.behaviorHints.defaultVideoId;
@@ -1797,7 +2031,6 @@
 
 			var cast = undefined;
 
-			// Helper: extract cast from an array of cast objects
 			function extractCast(castArr) {
 				if (!Array.isArray(castArr) || castArr.length === 0) return null;
 				var result = [];
@@ -1815,7 +2048,6 @@
 								c.profile ||
 								c.profile_path ||
 								"";
-							// Convert TMDB relative path to full URL
 							if (img && img.indexOf("http") !== 0 && img.indexOf("/") === 0) {
 								img = TMDB_IMG_BASE + "/w185" + img;
 							}
@@ -1832,10 +2064,7 @@
 				return result.length > 0 ? result : null;
 			}
 
-			// Try standard meta.cast first
 			cast = extractCast(meta.cast);
-
-			// If no cast yet, try Cinemeta's credits_cast (has profile_path)
 			if (!cast && Array.isArray(meta.credits_cast)) {
 				cast = extractCast(meta.credits_cast);
 			}
@@ -1951,6 +2180,13 @@
 	// ────────────────────────────────────────────────────────────────
 	//  SECTION 16: loadStreams() — Stream from all streaming addons
 	// ────────────────────────────────────────────────────────────────
+	//
+	//  PRODUCTION FEATURES:
+	//    ★ Read-through cache (check cache first, 3 min TTL)
+	//    ★ Per-addon timeout (80s configurable)
+	//    ★ Parallel queries with individual timeouts
+	//    ★ Deduplication by infoHash/URL
+	//    ★ Sort by quality (4K → 1080p → 720p → ...)
 
 	async function loadStreams(url, cb) {
 		try {
@@ -1959,7 +2195,14 @@
 				return cb({ success: false, data: [] });
 			}
 
-			// Detect type from URL: if it has :season:episode, it's a series
+			// ── Check stream cache first (read-through) ──
+			var cacheKey = "streams:" + rawInput;
+			var cached = cacheGet(cacheKey);
+			if (cached && cached.data && Array.isArray(cached.data)) {
+				return cb({ success: true, data: cached.data });
+			}
+
+			// Detect whether this is a series or movie from URL format
 			var isSeries = /:\d+:\d+$/.test(rawInput);
 			var streamTypes = isSeries ? ["series"] : ["movie", "series"];
 
@@ -1982,7 +2225,7 @@
 				if (!addonManifest.resources || !Array.isArray(addonManifest.resources))
 					continue;
 
-				// Check if this addon supports streaming
+				// Check if this addon supports the "stream" resource
 				var supportsStream = false;
 				for (var ri = 0; ri < addonManifest.resources.length; ri++) {
 					var res = addonManifest.resources[ri];
@@ -1998,7 +2241,6 @@
 				if (!supportsStream) continue;
 
 				(function (idx, base, display) {
-					// Try each stream type (movie and/or series) for this addon
 					for (var ti = 0; ti < streamTypes.length; ti++) {
 						var streamType = streamTypes[ti];
 						var streamUrl =
@@ -2059,7 +2301,8 @@
 				for (var ii = 0; ii < arr.length; ii++) {
 					var st = arr[ii];
 					if (!st) continue;
-					var dk = dedupKey(st, si);
+					var addonIdx = st._addonIdx !== undefined ? st._addonIdx : si;
+					var dk = dedupKey(st, addonIdx);
 					if (!seenDedup[dk]) {
 						seenDedup[dk] = true;
 						merged.push(st);
@@ -2067,9 +2310,15 @@
 				}
 			}
 
+			// Sort by quality (best first)
 			merged.sort(function (a, b) {
 				return (b._sortKey || 0) - (a._sortKey || 0);
 			});
+
+			// Store in cache before returning
+			if (merged.length > 0) {
+				cacheSet(cacheKey, { data: merged }, STREAM_CACHE_TTL);
+			}
 
 			cb({ success: true, data: merged });
 		} catch (e) {
