@@ -37,7 +37,10 @@
       "https://6172e63fd702-del-kdrama-series-movies.baby-beamup.club/manifest.json",
       "https://nagare.nexioapp.org/%7B%22NexioNagare%22%3A%22eyJ1c2VFbmdsaXNoVGl0bGVzIjp0cnVlLCJwcmVmZXJEdWIiOnRydWUsInByb3ZpZGVycyI6WyJvbmV0d290aHJlZWFuaW1lIiwiYW5pem9uZSIsImFuaW1lbm9zdWIiLCJhbmltZXBhaGUiLCJnb2pvIl0sInJlc29sdXRpb25zIjpbIjEwODBwIiwiNzIwcCIsIjQ4MHAiXSwic2hvd1NlYXNvbmFsU2VyaWVzIjpmYWxzZSwic2hvd0FpcmluZ1NlcmllcyI6ZmFsc2UsInNob3dUcmVuZGluZ1NlcmllcyI6ZmFsc2UsInNob3dUb3BTZXJpZXMiOmZhbHNlLCJzaG93VHJlbmRpbmdNb3ZpZXMiOmZhbHNlLCJzaG93VG9wTW92aWVzIjpmYWxzZX0%22%7D/manifest.json",
       "https://sword-watch.vercel.app/manifest.json",
-      "https://dev-streamz-navy.vercel.app/manifest.json"
+      "https://dev-streamz-navy.vercel.app/manifest.json",
+      "https://cinnn.vercel.app/manifest.json",
+      "https://filmora-production.up.railway.app/manifest.json",
+      "https://astral-mu-two.vercel.app/manifest.json"
     ],
     "url": "https://raw.githubusercontent.com/sunriseve/anime/repo/dist/dev.cookie.stremio.sky"
   },
