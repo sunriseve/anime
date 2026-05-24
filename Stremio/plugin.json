@@ -1,41 +1,30 @@
 {
- "packageName": "dev.cookie.stremio",
- "name": "Stremio http-streams",
- "version": 1,
- "baseUrl": "https://stremio-hub.local",
- "description": "Stream content from Stremio HTTP addons. It strips away all other sources and delivers clean, direct streams.",
- "authors": ["Cookie\ud83c\udf6a"],
- "languages": ["en", "hi", "te", "ta", "ml", "kn", "bn"],
- "categories": ["Movies", "TV", "Anime", "Indian"],
+	"packageName": "dev.cookie.stremio-hub",
+	"name": "Stremio Hub",
+	"version": 2,
+	"baseUrl": "https://stremio-hub.local",
+	"description": "Universal Stremio addon aggregator for SkyStream. Aggregates catalogs, metadata, and streams from your configured Stremio addons — HTTP streams and torrents supported. Seamlessly browse, search, and stream across Movies, TV, Anime, and Indian content.",
+	"authors": ["Cookie 🍪"],
+	"languages": ["en", "hi", "te", "ta", "ml", "kn", "bn"],
+	"categories": ["Movies", "TV", "Anime", "Indian"],
 
- "catalogueAddons": [
-  "https://aio.pantelx.com/%7B%22userId%22%3A%22d252298e-2ca1-4d8f-b1c5-c1e66be22d98%22%7D/manifest.json"
- ],
+	"catalogueAddons": [
+		"https://aio.pantelx.com/%7B%22userId%22%3A%22d252298e-2ca1-4d8f-b1c5-c1e66be22d98%22%7D/manifest.json"
+	],
 
- "metaAddons": ["https://v3-cinemeta.strem.io/manifest.json"],
+	"metaAddons": ["https://v3-cinemeta.strem.io/manifest.json"],
 
-  
-  "streamingAddons": [
-
-    "https://87d6a6ef6b58-webstreamrmbg-dev.baby-beamup.club/manifest.json",
-    "https://hdhub.thevolecitor.qzz.io/eyJ0b3Jib3giOiJ1bnNldCIsInF1YWxpdGllcyI6IjIxNjBwLDEwODBwLDcyMHAsNDgwcCIsInNvcnQiOiJhc2MiLCJtcSI6NSwibXAiOjEwfQ/manifest.json",
-    "https://badboysxs-morpheus.hf.space/bWIsbm0sZGYsaGgsa2gsa20sYXcsaG0/manifest.json",
-    "https://nebula.work.gd/configured/all/default/prefer-h264%2Cprefer-smaller-files%2Cprefer-direct-hosts%2Cdedupe%3Dsmart%2Cmax-size-gb%3D10/manifest.json",
-    "https://6172e63fd702-del-kdrama-series-movies.baby-beamup.club/manifest.json",
-
-
-    "https://nagare.nexioapp.org/%7B%22NexioNagare%22%3A%22eyJ1c2VFbmdsaXNoVGl0bGVzIjp0cnVlLCJwcmVmZXJEdWIiOnRydWUsInByb3ZpZGVycyI6WyJvbmV0d290aHJlZWFuaW1lIiwiYW5pem9uZSIsImFuaW1lbm9zdWIiLCJhbmltZXBhaGUiLCJnb2pvIl0sInJlc29sdXRpb25zIjpbIjEwODBwIiwiNzIwcCIsIjQ4MHAiXSwic2hvd1NlYXNvbmFsU2VyaWVzIjpmYWxzZSwic2hvd0FpcmluZ1NlcmllcyI6ZmFsc2UsInNob3dUcmVuZGluZ1NlcmllcyI6ZmFsc2UsInNob3dUb3BTZXJpZXMiOmZhbHNlLCJzaG93VHJlbmRpbmdNb3ZpZXMiOmZhbHNlLCJzaG93VG9wTW92aWVzIjpmYWxzZX0%22%7D/manifest.json",
-
-
-
-    "https://sword-watch.vercel.app/manifest.json",
-    "https://dev-streamz-navy.vercel.app/manifest.json",
-   
-   "https://cinnn.vercel.app/manifest.json",
-   "https://filmora-production.up.railway.app/manifest.json",
-   "https://astral-mu-two.vercel.app/manifest.json"
-  
-
-
-  ]
+	"streamingAddons": [
+		"https://87d6a6ef6b58-webstreamrmbg-dev.baby-beamup.club/manifest.json",
+		"https://hdhub.thevolecitor.qzz.io/eyJ0b3Jib3giOiJ1bnNldCIsInF1YWxpdGllcyI6IjIxNjBwLDEwODBwLDcyMHAsNDgwcCIsInNvcnQiOiJhc2MiLCJtcSI6NSwibXAiOjEwfQ/manifest.json",
+		"https://badboysxs-morpheus.hf.space/bWIsbm0sZGYsaGgsa2gsa20sYXcsaG0/manifest.json",
+		"https://nebula.work.gd/configured/all/default/prefer-h264%2Cprefer-smaller-files%2Cprefer-direct-hosts%2Cdedupe%3Dsmart%2Cmax-size-gb%3D10/manifest.json",
+		"https://6172e63fd702-del-kdrama-series-movies.baby-beamup.club/manifest.json",
+		"https://nagare.nexioapp.org/%7B%22NexioNagare%22%3A%22eyJ1c2VFbmdsaXNoVGl0bGVzIjp0cnVlLCJwcmVmZXJEdWIiOnRydWUsInByb3ZpZGVycyI6WyJvbmV0d290aHJlZWFuaW1lIiwiYW5pem9uZSIsImFuaW1lbm9zdWIiLCJhbmltZXBhaGUiLCJnb2pvIl0sInJlc29sdXRpb25zIjpbIjEwODBwIiwiNzIwcCIsIjQ4MHAiXSwic2hvd1NlYXNvbmFsU2VyaWVzIjpmYWxzZSwic2hvd0FpcmluZ1NlcmllcyI6ZmFsc2UsInNob3dUcmVuZGluZ1NlcmllcyI6ZmFsc2UsInNob3dUb3BTZXJpZXMiOmZhbHNlLCJzaG93VHJlbmRpbmdNb3ZpZXMiOmZhbHNlLCJzaG93VG9wTW92aWVzIjpmYWxzZX0%22%7D/manifest.json",
+		"https://sword-watch.vercel.app/manifest.json",
+		"https://dev-streamz-navy.vercel.app/manifest.json",
+		"https://cinnn.vercel.app/manifest.json",
+		"https://filmora-production.up.railway.app/manifest.json",
+		"https://astral-mu-two.vercel.app/manifest.json"
+	]
 }
