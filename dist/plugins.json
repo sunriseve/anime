@@ -1,12 +1,12 @@
 [
   {
-    "packageName": "dev.cookie.stremio",
-    "name": "Stremio http-streams",
-    "version": 1,
+    "packageName": "dev.cookie.stremio-hub",
+    "name": "Stremio Hub",
+    "version": 2,
     "baseUrl": "https://stremio-hub.local",
-    "description": "Stream content from Stremio HTTP addons. It strips away all other sources and delivers clean, direct streams.",
+    "description": "Universal Stremio addon aggregator for SkyStream. Aggregates catalogs, metadata, and streams from your configured Stremio addons — HTTP streams and torrents supported. Seamlessly browse, search, and stream across Movies, TV, Anime, and Indian content.",
     "authors": [
-      "Cookie🍪"
+      "Cookie 🍪"
     ],
     "languages": [
       "en",
@@ -42,7 +42,7 @@
       "https://filmora-production.up.railway.app/manifest.json",
       "https://astral-mu-two.vercel.app/manifest.json"
     ],
-    "url": "https://raw.githubusercontent.com/sunriseve/anime/repo/dist/dev.cookie.stremio.sky"
+    "url": "https://raw.githubusercontent.com/sunriseve/anime/repo/dist/dev.cookie.stremio-hub.sky"
   },
   {
     "packageName": "dev.kimcartoon.plugin",
