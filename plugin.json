@@ -1,0 +1,17 @@
+{
+	"packageName": "dev.multisource.hub",
+	"name": "MultiSource Hub",
+	"version": 1,
+  "baseUrl": "https://multisource-api.fly.dev",
+	"description": "Aggregate HLS streams from 40+ sources via MultiSource API. TMDB-powered metadata with trending, top rated, and anime categories. Streams are resolved server-side for maximum reliability.",
+	"authors": ["MultiSourceHub"],
+	"languages": ["en"],
+	"categories": ["Movie", "TvSeries", "Anime"],
+	"domains": [
+		{
+			"name": "multisource-api.fly.dev",
+			"url": "https://multisource-api.fly.dev"
+		},
+		{ "name": "localhost:3000", "url": "http://localhost:3000" }
+	]
+}
